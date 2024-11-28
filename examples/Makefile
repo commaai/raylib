@@ -154,6 +154,12 @@ ifeq ($(TARGET_PLATFORM),PLATFORM_DRM)
         PLATFORM_OS = LINUX
     endif
 endif
+ifeq ($(TARGET_PLATFORM),PLATFORM_COMMA)
+    UNAMEOS = $(shell uname)
+    ifeq ($(UNAMEOS),Linux)
+        PLATFORM_OS = LINUX
+    endif
+endif
 
 # Default path for raylib on Raspberry Pi
 ifeq ($(TARGET_PLATFORM),PLATFORM_DRM)
@@ -291,6 +297,15 @@ endif
 ifeq ($(TARGET_PLATFORM),PLATFORM_DRM)
     INCLUDE_PATHS += -I$(RAYLIB_INCLUDE_PATH)
     INCLUDE_PATHS += -I/usr/include/libdrm
+endif
+
+ifeq ($(TARGET_PLATFORM),PLATFORM_COMMA)
+    INCLUDE_PATHS += -I$(RAYLIB_INCLUDE_PATH)
+endif
+
+# Include GLFW required for examples/others/rlgl_standalone.c
+ifeq ($(USE_EXTERNAL_GLFW),FALSE)
+all others: INCLUDE_PATHS += -I$(RAYLIB_PATH)/src/external/glfw/include
 endif
 
 # Define library paths containing required libs: LDFLAGS
@@ -513,6 +528,9 @@ ifeq ($(TARGET_PLATFORM),PLATFORM_DESKTOP_WIN32)
     ifneq ($(GRAPHICS),GRAPHICS_API_OPENGL_SOFTWARE)
         LDLIBS += -lopengl32
     endif
+endif
+ifeq ($(TARGET_PLATFORM),PLATFORM_COMMA)
+    LDLIBS = -lraylib -lGLESv2 -lEGL -lwayland-client -lwayland-egl -lpthread -lrt -lm -lGL -ldl -latomic
 endif
 ifeq ($(TARGET_PLATFORM),$(filter $(TARGET_PLATFORM),PLATFORM_WEB PLATFORM_WEB_RGFW))
     # Libraries for web (HTML5) compiling
@@ -795,6 +813,10 @@ ifeq ($(TARGET_PLATFORM),PLATFORM_DESKTOP_GLFW)
     endif
 endif
 ifeq ($(TARGET_PLATFORM),PLATFORM_DRM)
+	find . -type f -executable -delete
+	rm -fv *.o
+endif
+ifeq ($(TARGET_PLATFORM),PLATFORM_COMMA)
 	find . -type f -executable -delete
 	rm -fv *.o
 endif
