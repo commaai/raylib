@@ -313,6 +313,55 @@ static int init_touch(const char *dev_path) {
   return 0;
 }
 
+static int init_window_flags(int requested_width, int requested_height) {
+  // auto-detect resolution
+  if (requested_width == 0 && requested_height == 0) {
+    const char *adapter_file = "/sys/class/drm/card0-DSI-1/modes"
+    FILE *file = fopen(adapter_file, "r");
+    if (file == NULL) {
+      TRACELOG(LOG_WARNING, "COMMA: Failed to open video adapter file %s", adapter_file);
+      return -1;
+    }
+
+    int adapter_width = 0;
+    int adapter_height = 0;
+    if (fscanf(file, "%dx%d", &adapter_height, &adapter_width) != 2) {
+      TRACELOG(LOG_WARNING, "COMMA: Failed to parse video adapter file %s", adapter_file);
+      fclose(file);
+      return -1;
+    }
+
+    if (adapter_height <= 0 || adapter_width <= 0) {
+      TRACELOG(LOG_WARNING, "COMMA: Got invalid screen size from %s : %d x %d", adapter_file, adapter_width, adapter_height);
+      fclose(file);
+      return -1;
+    }
+
+    requested_width = adapter_width;
+    requested_height = adapter_height;
+
+    fclose(file);
+  }
+
+  // we only support fullscreen
+  CORE.Window.fullscreen = true;
+  CORE.Window.flags |= FLAG_FULLSCREEN_MODE;
+
+  // in our case, all those width/height are the same
+  CORE.Window.screen.width = requested_width;
+  CORE.Window.screen.height = requested_height;
+  CORE.Window.currentFbo.width = requested_width;
+  CORE.Window.currentFbo.height = requested_height;
+  CORE.Window.display.width = requested_width;
+  CORE.Window.display.height = requested_height;
+  CORE.Window.render.width = requested_width;
+  CORE.Window.render.height = requested_height;
+
+  TRACELOG(LOG_INFO, "COMMA: Screen size: %d x %d", requested_width, requested_height);
+
+  return 0;
+}
+
 //----------------------------------------------------------------------------------
 // Module Internal Functions Declaration
 //----------------------------------------------------------------------------------
@@ -668,17 +717,10 @@ void PollInputEvents(void) {
 
 int InitPlatform(void) {
 
-  // only support fullscreen
-  CORE.Window.fullscreen = true;
-  CORE.Window.flags |= FLAG_FULLSCREEN_MODE;
-
-  // in our case, all those width/height are the same
-  CORE.Window.currentFbo.width = CORE.Window.screen.width;
-  CORE.Window.currentFbo.height = CORE.Window.screen.height;
-  CORE.Window.display.width = CORE.Window.screen.width;
-  CORE.Window.display.height = CORE.Window.screen.height;
-  CORE.Window.render.width = CORE.Window.screen.width;
-  CORE.Window.render.height = CORE.Window.screen.height;
+  if (init_window_flags(CORE.Window.screen.width, CORE.Window.screen.height)) {
+    TRACELOG(LOG_FATAL, "COMMA: Failed to init window flags");
+    return -1;
+  }
 
   if (init_wayland(CORE.Window.currentFbo.width, CORE.Window.currentFbo.height)) {
     TRACELOG(LOG_FATAL, "COMMA: Failed to initialize Wayland");
