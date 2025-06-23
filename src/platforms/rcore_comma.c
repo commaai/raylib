@@ -72,6 +72,7 @@ struct finger {
   TouchAction action;
   int x;
   int y;
+  bool resetNextFrame;
 };
 
 struct touch {
@@ -110,7 +111,6 @@ typedef struct {
     struct wayland_platform wayland;
     struct egl_platform egl;
     struct touch touch;
-    char resetTouchState[MAX_TOUCH_POINTS];  // Marks touch state to reset
 } PlatformData;
 
 //----------------------------------------------------------------------------------
@@ -316,10 +316,10 @@ static int init_touch(const char *dev_path, const char *origin_path) {
     platform.touch.fingers[i].x = -1;
     platform.touch.fingers[i].y = -1;
     platform.touch.fingers[i].action = TOUCH_ACTION_UP;
+    platform.touch.fingers[i].resetNextFrame = false;
 
     CORE.Input.Touch.currentTouchState[0] = 0;
     CORE.Input.Touch.previousTouchState[0] = 0;
-    platform.resetTouchState[0] = 0;
   }
 
   for (int i = 0; i < MAX_MOUSE_BUTTONS; ++i) {
@@ -622,9 +622,9 @@ void PollInputEvents(void) {
   for (int i = 0; i < MAX_TOUCH_POINTS; ++i) {
     CORE.Input.Touch.previousTouchState[i] = CORE.Input.Touch.currentTouchState[i];
     // caused by single frame down and up events
-    if (platform.resetTouchState[i]) {
+    if (platform.touch.fingers[i].resetNextFrame) {
       CORE.Input.Touch.currentTouchState[i] = 0;
-      platform.resetTouchState[i] = 0;
+      platform.touch.fingers[i].resetNextFrame = false;
     }
   }
 
@@ -660,7 +660,7 @@ void PollInputEvents(void) {
           // delay up event by one frame so that API user needs no special handling
           if (CORE.Input.Touch.previousTouchState[i] == 0) {
             CORE.Input.Touch.currentTouchState[i] = 1;
-            platform.resetTouchState[i] = 1;  // mark to be reset next event update loop
+            platform.touch.fingers[i].resetNextFrame = true;  // mark to be reset next event update loop
           } else {
             CORE.Input.Touch.currentTouchState[i] = 0;
           }
