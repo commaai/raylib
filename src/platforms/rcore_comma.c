@@ -628,7 +628,7 @@ void PollInputEvents(void) {
   CORE.Input.Mouse.previousPosition = CORE.Input.Mouse.currentPosition;
   CORE.Input.Touch.pointCount = 0;
 
-  int released_detected = 0;
+//  int released_detected = 0;
 
   struct input_event event = {0};
   while (read(platform.touch.fd, &event, sizeof(struct input_event)) == sizeof(struct input_event)) {
