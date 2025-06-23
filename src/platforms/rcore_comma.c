@@ -619,6 +619,7 @@ void PollInputEvents(void) {
 
   for (int i = 0; i < MAX_TOUCH_POINTS; ++i) {
     CORE.Input.Touch.previousTouchState[i] = CORE.Input.Touch.currentTouchState[i];
+    CORE.Input.Touch.currentTouchState[i]  = 0;
   }
 
   for (int i = 0; i < MAX_MOUSE_BUTTONS; ++i) {
@@ -649,9 +650,9 @@ void PollInputEvents(void) {
           }
 
         } else if (platform.touch.fingers[i].action == TOUCH_ACTION_UP) {
-          if (CORE.Input.Touch.currentTouchState[i] == 1) {
-            released_detected = 1;
-          }
+//          if (CORE.Input.Touch.currentTouchState[i] == 1) {
+//            released_detected = 1;
+//          }
           CORE.Input.Touch.position[i].x = -1;
           CORE.Input.Touch.position[i].y = -1;
           // if we received a touch up event but was not previously tracking the touch,
