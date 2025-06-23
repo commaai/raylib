@@ -654,9 +654,14 @@ void PollInputEvents(void) {
           }
           CORE.Input.Touch.position[i].x = -1;
           CORE.Input.Touch.position[i].y = -1;
-          // hack for now to detect gestures in single frame
-          CORE.Input.Touch.previousTouchState[0] = 1;
-          CORE.Input.Touch.currentTouchState[i] = 0;
+          // if we received a touch up event but was not previously tracking the touch,
+          // assume we got down and up in a single frame and set touch down now.
+          // this delays touch release by one single frame but sends proper down and up
+          if (CORE.Input.Touch.previousTouchState[i] == 0) {
+            CORE.Input.Touch.currentTouchState[i] = 1;
+          } else {
+            CORE.Input.Touch.currentTouchState[i] = 0;
+          }
         }
       }
 
