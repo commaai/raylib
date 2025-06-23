@@ -654,6 +654,8 @@ void PollInputEvents(void) {
           }
           CORE.Input.Touch.position[i].x = -1;
           CORE.Input.Touch.position[i].y = -1;
+          // hack for now to detect gestures in single frame
+          CORE.Input.Touch.previousTouchState[0] = 1;
           CORE.Input.Touch.currentTouchState[i] = 0;
         }
       }
@@ -672,11 +674,9 @@ void PollInputEvents(void) {
     }
   }
 
-  // hack for now to detect gestures in single frame
-  if (released_detected) {
-    CORE.Input.Touch.previousTouchState[0] = 1;
-    CORE.Input.Touch.currentTouchState[0] = 0;
-  }
+//  if (released_detected) {
+//    CORE.Input.Touch.currentTouchState[0] = 0;
+//  }
 
   // count how many fingers are left on the screen after processing all events
   for (int i = 0; i < MAX_TOUCH_POINTS; ++i) {
