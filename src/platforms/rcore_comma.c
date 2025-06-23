@@ -634,8 +634,6 @@ void PollInputEvents(void) {
   CORE.Input.Mouse.previousPosition = CORE.Input.Mouse.currentPosition;
   CORE.Input.Touch.pointCount = 0;
 
-//  int released_detected = 0;
-
   struct input_event event = {0};
   while (read(platform.touch.fd, &event, sizeof(struct input_event)) == sizeof(struct input_event)) {
     if (event.type == SYN_REPORT) { // synchronization frame. Expose completed events back to the library
@@ -655,9 +653,6 @@ void PollInputEvents(void) {
           }
 
         } else if (platform.touch.fingers[i].action == TOUCH_ACTION_UP) {
-//          if (CORE.Input.Touch.currentTouchState[i] == 1) {
-//            released_detected = 1;
-//          }
           CORE.Input.Touch.position[i].x = -1;
           CORE.Input.Touch.position[i].y = -1;
           // if we received a touch up event but was not previously tracking the touch,
@@ -685,10 +680,6 @@ void PollInputEvents(void) {
       }
     }
   }
-
-//  if (released_detected) {
-//    CORE.Input.Touch.currentTouchState[0] = 0;
-//  }
 
   // count how many fingers are left on the screen after processing all events
   for (int i = 0; i < MAX_TOUCH_POINTS; ++i) {
