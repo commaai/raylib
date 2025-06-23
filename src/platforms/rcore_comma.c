@@ -318,6 +318,7 @@ static int init_touch(const char *dev_path, const char *origin_path) {
 
     CORE.Input.Touch.currentTouchState[0] = 0;
     CORE.Input.Touch.previousTouchState[0] = 0;
+    CORE.Input.Touch.resetTouchState[0] = 0;
   }
 
   for (int i = 0; i < MAX_MOUSE_BUTTONS; ++i) {
@@ -619,7 +620,11 @@ void PollInputEvents(void) {
 
   for (int i = 0; i < MAX_TOUCH_POINTS; ++i) {
     CORE.Input.Touch.previousTouchState[i] = CORE.Input.Touch.currentTouchState[i];
-    CORE.Input.Touch.currentTouchState[i]  = 0;
+    // caused by single frame down and up events
+    if (CORE.Input.Touch.resetTouchState[i]) {
+      CORE.Input.Touch.currentTouchState[i] = 0;
+      CORE.Input.Touch.resetTouchState[i] = 0;
+    }
   }
 
   for (int i = 0; i < MAX_MOUSE_BUTTONS; ++i) {
@@ -660,6 +665,7 @@ void PollInputEvents(void) {
           // this delays touch release by one single frame but sends proper down and up
           if (CORE.Input.Touch.previousTouchState[i] == 0) {
             CORE.Input.Touch.currentTouchState[i] = 1;
+            CORE.Input.Touch.resetTouchState[i] = 1;  // mark to be reset next event update loop
           } else {
             CORE.Input.Touch.currentTouchState[i] = 0;
           }
