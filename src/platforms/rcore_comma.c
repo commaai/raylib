@@ -110,6 +110,7 @@ typedef struct {
     struct wayland_platform wayland;
     struct egl_platform egl;
     struct touch touch;
+    char resetTouchState[MAX_TOUCH_POINTS];  // Marks touch state to reset
 } PlatformData;
 
 //----------------------------------------------------------------------------------
@@ -318,7 +319,7 @@ static int init_touch(const char *dev_path, const char *origin_path) {
 
     CORE.Input.Touch.currentTouchState[0] = 0;
     CORE.Input.Touch.previousTouchState[0] = 0;
-    CORE.Input.Touch.resetTouchState[0] = 0;
+    platform.resetTouchState[0] = 0;
   }
 
   for (int i = 0; i < MAX_MOUSE_BUTTONS; ++i) {
@@ -621,9 +622,9 @@ void PollInputEvents(void) {
   for (int i = 0; i < MAX_TOUCH_POINTS; ++i) {
     CORE.Input.Touch.previousTouchState[i] = CORE.Input.Touch.currentTouchState[i];
     // caused by single frame down and up events
-    if (CORE.Input.Touch.resetTouchState[i]) {
+    if (platform.resetTouchState[i]) {
       CORE.Input.Touch.currentTouchState[i] = 0;
-      CORE.Input.Touch.resetTouchState[i] = 0;
+      platform.resetTouchState[i] = 0;
     }
   }
 
@@ -655,12 +656,11 @@ void PollInputEvents(void) {
         } else if (platform.touch.fingers[i].action == TOUCH_ACTION_UP) {
           CORE.Input.Touch.position[i].x = -1;
           CORE.Input.Touch.position[i].y = -1;
-          // if we received a touch up event but was not previously tracking the touch,
-          // assume we got down and up in a single frame and set touch down now.
-          // this delays touch release by one single frame but sends proper down and up
+          // if we received a touch down and up event in the same frame,
+          // delay up event by one frame so that API user needs no special handling
           if (CORE.Input.Touch.previousTouchState[i] == 0) {
             CORE.Input.Touch.currentTouchState[i] = 1;
-            CORE.Input.Touch.resetTouchState[i] = 1;  // mark to be reset next event update loop
+            platform.resetTouchState[i] = 1;  // mark to be reset next event update loop
           } else {
             CORE.Input.Touch.currentTouchState[i] = 0;
           }

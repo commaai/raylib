@@ -339,7 +339,6 @@ typedef struct CoreData {
             Vector2 position[MAX_TOUCH_POINTS];         // Touch position on screen
             char currentTouchState[MAX_TOUCH_POINTS];   // Registers current touch state
             char previousTouchState[MAX_TOUCH_POINTS];  // Registers previous touch state
-            char resetTouchState[MAX_TOUCH_POINTS];     // Marks touch state to reset
 
         } Touch;
         struct {
