@@ -572,6 +572,8 @@ void DisableCursor(void) {
   CORE.Input.Mouse.cursorHidden = true;
 }
 
+EGLSyncKHR frame_fence = EGL_NO_SYNC_KHR;
+
 // Swap back buffer with front buffer (screen drawing)
 void SwapScreenBuffer(void) {
   if (frame_fence != EGL_NO_SYNC_KHR) {
