@@ -574,10 +574,21 @@ void DisableCursor(void) {
 
 // Swap back buffer with front buffer (screen drawing)
 void SwapScreenBuffer(void) {
-  eglSwapBuffers(platform.egl.display, platform.egl.surface);
+  if (frame_fence != EGL_NO_SYNC_KHR) {
+    EGLint st = eglClientWaitSyncKHR(platform.egl.display, frame_fence, 0, 0);
+    if (st == EGL_TIMEOUT_EXPIRED) {
+      return false;
+    }
+    eglDestroySyncKHR(platform.egl.display, frame_fence);
+    frame_fence = EGL_NO_SYNC_KHR;
+  }
 
-  wl_display_flush(platform.wayland.wl_display);
-  wl_display_dispatch_pending(platform.wayland.wl_display);
+  eglSwapBuffers(platform.egl.display, platform.egl.surface);
+  frame_fence = eglCreateSyncKHR(platform.egl.display, EGL_SYNC_FENCE_KHR, NULL);
+  return true;
+
+//  wl_display_flush(platform.wayland.wl_display);
+//  wl_display_dispatch_pending(platform.wayland.wl_display);
 }
 
 //----------------------------------------------------------------------------------
