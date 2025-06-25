@@ -289,6 +289,13 @@ static int init_egl () {
      return -1;
    }
 
+   // >1 is not supported
+   EGLBoolean ok = eglSwapInterval(platform.egl.display, (CORE.Window.flags & FLAG_VSYNC_HINT) ? 1 : 0);
+   if (ok == EGL_FALSE) {
+     TRACELOG(LOG_WARNING, "COMMA: eglSwapInterval failed. Error code: %s", eglGetErrorString(eglGetError()));
+     return -1;
+   }
+
    // enable depth testing. Not necessary if only doing 2D
    glEnable(GL_DEPTH_TEST);
 
