@@ -575,6 +575,9 @@ void DisableCursor(void) {
 // Swap back buffer with front buffer (screen drawing)
 void SwapScreenBuffer(void) {
   eglSwapBuffers(platform.egl.display, platform.egl.surface);
+
+  wl_display_flush(platform.wayland.wl_display);
+  wl_display_dispatch_pending(platform.wayland.wl_display);
 }
 
 //----------------------------------------------------------------------------------
