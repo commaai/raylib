@@ -251,6 +251,7 @@ static int init_egl () {
      EGL_RED_SIZE,   8,
      EGL_GREEN_SIZE, 8,
      EGL_BLUE_SIZE,  8,
+     EGL_ALPHA_SIZE, 0,
      EGL_DEPTH_SIZE, 24,
      EGL_NONE
    };
@@ -292,6 +293,11 @@ static int init_egl () {
      TRACELOG(LOG_WARNING, "COMMA: Failed to attach the OpenGL ES context to the EGL surface. Error code: %s", eglGetErrorString(eglGetError()));
      return -1;
    }
+
+   EGLint invert = 0;
+   eglSurfaceAttrib(platform.egl.display,
+                    platform.egl.surface,
+                    EGL_WAYLAND_Y_INVERTED_WL, invert);
 
    // >1 is not supported
    EGLBoolean ok = eglSwapInterval(platform.egl.display, (CORE.Window.flags & FLAG_VSYNC_HINT) ? 1 : 0);
