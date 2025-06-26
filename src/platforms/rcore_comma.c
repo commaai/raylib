@@ -51,6 +51,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <fcntl.h>
+#include <unistd.h>
 
 #include <linux/input.h>
 
@@ -577,7 +578,11 @@ void DisableCursor(void) {
 
 // Swap back buffer with front buffer (screen drawing)
 void SwapScreenBuffer(void) {
+  glFinish();
+
+  usleep(16666);
   eglSwapBuffers(platform.egl.display, platform.egl.surface);
+  usleep(16666);
 
 //  wl_display_flush(platform.wayland.wl_display);
 //  wl_display_dispatch_pending(platform.wayland.wl_display);
