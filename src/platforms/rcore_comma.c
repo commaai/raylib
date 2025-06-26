@@ -294,6 +294,8 @@ static int init_egl () {
      return -1;
    }
 
+   #define EGL_WAYLAND_Y_INVERTED_WL 0x31DB
+
    EGLint invert = 0;
    eglSurfaceAttrib(platform.egl.display,
                     platform.egl.surface,
