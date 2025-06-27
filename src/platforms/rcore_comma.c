@@ -84,7 +84,6 @@ struct finger {
 struct touch {
   struct finger fingers[MAX_TOUCH_POINTS];
   int fd;
-  int canonical;
 };
 
 // hold all the low level wayland stuff
@@ -117,6 +116,7 @@ typedef struct {
     struct wayland_platform wayland;
     struct egl_platform egl;
     struct touch touch;
+    bool canonical_zero;
 } PlatformData;
 
 //----------------------------------------------------------------------------------
@@ -211,8 +211,24 @@ static int init_wayland(int width, int height) {
   // create a surface with a buffer to do render on it
   platform.wayland.wl_surface = wl_compositor_create_surface(platform.wayland.wl_compositor);
 
+  FILE *fp = fopen("/sys/devices/platform/vendor/vendor:gpio-som-id/som_id", "r");
+  if (fp != NULL) {
+    int origin;
+    int ret = fscanf(fp, "%d", &origin);
+    fclose(fp);
+    if (ret != 1) {
+      TRACELOG(LOG_WARNING, "COMMA: Failed to test for screen origin");
+      return -1;
+    } else {
+      platform.canonical_zero = origin == 1;
+    }
+  } else {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to open screen origin");
+    return -1;
+  }
+
   // apply rotation transform to the buffer of the surface
-  wl_surface_set_buffer_transform(platform.wayland.wl_surface, WL_OUTPUT_TRANSFORM_270);
+  wl_surface_set_buffer_transform(platform.wayland.wl_surface, platform.canonical_zero ? WL_OUTPUT_TRANSFORM_90 : WL_OUTPUT_TRANSFORM_270);
 
   platform.wayland.wl_shell_surface = wl_shell_get_shell_surface(platform.wayland.wl_shell, platform.wayland.wl_surface);
   wl_shell_surface_add_listener(platform.wayland.wl_shell_surface, &wl_shell_surface_listener, NULL);
@@ -302,26 +318,10 @@ static int init_egl () {
    return 0;
 }
 
-static int init_touch(const char *dev_path, const char *origin_path) {
+static int init_touch(const char *dev_path) {
   platform.touch.fd = open(dev_path, O_RDONLY|O_NONBLOCK);
   if (platform.touch.fd < 0) {
     TRACELOG(LOG_WARNING, "COMMA: Failed to open touch device at %s", dev_path);
-    return -1;
-  }
-
-  FILE *fp = fopen(origin_path, "r");
-  if (fp != NULL) {
-    int origin;
-    int ret = fscanf(fp, "%d", &origin);
-    fclose(fp);
-    if (ret != 1) {
-      TRACELOG(LOG_WARNING, "COMMA: Failed to test for screen origin");
-      return -1;
-    } else {
-      platform.touch.canonical = origin == 1;
-    }
-  } else {
-    TRACELOG(LOG_WARNING, "COMMA: Failed to open screen origin");
     return -1;
   }
 
@@ -690,9 +690,9 @@ void PollInputEvents(void) {
       } else if (event.code == ABS_MT_TRACKING_ID) { // finger on screen or not
         platform.touch.fingers[slot].state = event.value == -1 ? FINGER_STATE_REMOVING : FINGER_STATE_TOUCHING;
       } else if (event.code == ABS_MT_POSITION_X) {
-        platform.touch.fingers[slot].y = (1 - platform.touch.canonical) * (CORE.Window.screen.height - event.value) + (platform.touch.canonical * event.value);
+        platform.touch.fingers[slot].y = (1 - platform.canonical_zero) * (CORE.Window.screen.height - event.value) + (platform.canonical_zero * event.value);
       } else if (event.code == ABS_MT_POSITION_Y) {
-        platform.touch.fingers[slot].x = platform.touch.canonical * (CORE.Window.screen.width - event.value) + ((1 - platform.touch.canonical) * event.value);
+        platform.touch.fingers[slot].x = platform.canonical_zero * (CORE.Window.screen.width - event.value) + ((1 - platform.canonical_zero) * event.value);
       }
     }
   }
@@ -731,7 +731,7 @@ int InitPlatform(void) {
     return -1;
   }
 
-  if (init_touch("/dev/input/event2", "/sys/devices/platform/vendor/vendor:gpio-som-id/som_id")) {
+  if (init_touch("/dev/input/event2")) {
     TRACELOG(LOG_FATAL, "COMMA: Failed to initialize touch device");
     return -1;
   }
