@@ -666,9 +666,6 @@ void PollInputEvents(void) {
           }
 
         } else if (platform.touch.fingers[i].state == FINGER_STATE_REMOVING) {
-          CORE.Input.Touch.position[i].x = -1;
-          CORE.Input.Touch.position[i].y = -1;
-
           // if we received a touch down and up event in the same frame,
           // delay up event by one frame so that API user needs no special handling
           if (CORE.Input.Touch.previousTouchState[i] == 0) {
