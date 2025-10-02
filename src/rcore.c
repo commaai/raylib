@@ -373,6 +373,8 @@ RLAPI const char *raylib_version = RAYLIB_VERSION;  // raylib version exported s
 CoreData CORE = { 0 };                      // Global CORE state context
 
 static RenderTexture2D gLogicalTarget = {0};
+static int LOGI_W = 0, LOGI_H = 0;
+static int PHYS_W = 0, PHYS_H = 0;
 
 // Flag to note GPU acceleration is available,
 // referenced from other modules to support GPU data loading
@@ -723,7 +725,11 @@ void InitWindow(int width, int height, const char *title)
 
     TRACELOG(LOG_INFO, "SYSTEM: Working Directory: %s", GetWorkingDirectory());
 
-    gLogicalTarget = LoadRenderTexture(2160, 1080);
+    gLogicalTarget = LoadRenderTexture(CORE.Window.screen.width, CORE.Window.screen.height);
+    LOGI_W = CORE.Window.screen.width;
+    LOGI_H = CORE.Window.screen.height;
+    PHYS_W = CORE.Window.screen.height;
+    PHYS_H = CORE.Window.screen.width;
 }
 
 // Close window and unload OpenGL context
@@ -897,9 +903,10 @@ void BeginDrawing(void)
 void EndDrawing(void)
 {
     EndTextureMode();
-    Rectangle src = {0.0, 0.0, 2160.0, -1080.0};
-    Rectangle dest = {540.0, 1080.0, 2160.0, 1080.0};
-    Vector2 origin = { 1080.0, 540.0 };
+
+    Rectangle src = {0.0, 0.0, LOGI_W, -LOGI_H};
+    Rectangle dest = {PHYS_W/2, PHYS_H/2, LOGI_W, LOGI_H};
+    Vector2 origin = { LOGI_W/2, LOGI_H/2 };
     DrawTexturePro(gLogicalTarget.texture, src, dest, origin, 90.0, WHITE);
 
     rlDrawRenderBatchActive();      // Update and draw internal render batch

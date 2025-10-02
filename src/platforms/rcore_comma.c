@@ -821,13 +821,12 @@ int InitPlatform(void) {
   CORE.Window.fullscreen = true;
   CORE.Window.flags |= FLAG_FULLSCREEN_MODE;
 
-  // in our case, all those width/height are the same
-  CORE.Window.currentFbo.width = CORE.Window.screen.width;
-  CORE.Window.currentFbo.height = CORE.Window.screen.height;
   CORE.Window.display.width = CORE.Window.screen.width;
   CORE.Window.display.height = CORE.Window.screen.height;
-  CORE.Window.render.width = CORE.Window.screen.width;
-  CORE.Window.render.height = CORE.Window.screen.height;
+
+  // swapped since we render in landscape mode
+  CORE.Window.currentFbo.width = CORE.Window.screen.height;
+  CORE.Window.currentFbo.height = CORE.Window.screen.width;
 
   if (init_drm("/dev/dri/card0")) {
     TRACELOG(LOG_FATAL, "COMMA: Failed to initialize drm");
@@ -849,14 +848,10 @@ int InitPlatform(void) {
     return -1;
   }
 
-  SetupFramebuffer(CORE.Window.display.width, CORE.Window.display.height);
+  SetupFramebuffer(CORE.Window.currentFbo.width, CORE.Window.currentFbo.height);
   rlLoadExtensions(eglGetProcAddress);
   InitTimer();
   CORE.Storage.basePath = GetWorkingDirectory();
-
-  int tmp = CORE.Window.screen.width;
-  CORE.Window.screen.width = CORE.Window.screen.height;
-  CORE.Window.screen.height = tmp;
 
   TRACELOG(LOG_INFO, "COMMA: Initialized successfully");
   return 0;
