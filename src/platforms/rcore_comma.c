@@ -184,6 +184,8 @@ static int init_drm (const char *dev_path) {
   platform.drm.connector_id = connector->connector_id;
   platform.drm.mode = connector->modes[0];
   platform.drm.crtc_id = res->crtcs[0];
+
+  return 0;
 }
 
 static int init_egl () {
@@ -293,10 +295,10 @@ static void bo_user_data_destroy(struct gbm_bo *bo, void *user_data) {
   }
 }
 
-static int get_or_create_fb_for_bo(struct gbm_bo *bo, uint32_t *out_fb) {     
+static int get_or_create_fb_for_bo(struct gbm_bo *bo, uint32_t *out_fb) {
     void *user_data = gbm_bo_get_user_data(bo);
     if (user_data) {
-      *out_fb = (uint32_t)(uintptr_t)fb;
+      *out_fb = (uint32_t)(uintptr_t)user_data;
       return 0;
     }
 
@@ -337,10 +339,11 @@ static int set_screen_brightness() {
     return 1;
   } 
   close(fd_b);
+  return 0;
 }   
 
 static int init_screen () {
-  glClearColor(0, 0, 0, 1);
+  glClearColor(1, 0, 0, 1);
   glClear(GL_COLOR_BUFFER_BIT);
   eglSwapBuffers(platform.egl.display, platform.egl.surface);
 
@@ -784,7 +787,7 @@ int InitPlatform(void) {
   CORE.Window.render.width = CORE.Window.screen.width;
   CORE.Window.render.height = CORE.Window.screen.height;
 
-  if (init_drm()) {
+  if (init_drm("/dev/dri/card0")) {
     TRACELOG(LOG_FATAL, "COMMA: Failed to initialize drm");
     return -1;
   }
