@@ -343,7 +343,7 @@ static int set_screen_brightness() {
 }   
 
 static int init_screen () {
-  glClearColor(0, 0, 0, 1);
+  glClearColor(1, 0, 0, 1);
   glClear(GL_COLOR_BUFFER_BIT);
   eglSwapBuffers(platform.egl.display, platform.egl.surface);
 

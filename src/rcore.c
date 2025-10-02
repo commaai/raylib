@@ -372,6 +372,8 @@ RLAPI const char *raylib_version = RAYLIB_VERSION;  // raylib version exported s
 
 CoreData CORE = { 0 };                      // Global CORE state context
 
+static RenderTexture2D gLogicalTarget = {0};
+
 // Flag to note GPU acceleration is available,
 // referenced from other modules to support GPU data loading
 // NOTE: Useful to allow Texture, RenderTexture, Font.texture, Mesh.vaoId/vboId, Shader loading
@@ -720,6 +722,8 @@ void InitWindow(int width, int height, const char *title)
     SetRandomSeed((unsigned int)time(NULL));
 
     TRACELOG(LOG_INFO, "SYSTEM: Working Directory: %s", GetWorkingDirectory());
+
+    gLogicalTarget = LoadRenderTexture(2160, 1080);
 }
 
 // Close window and unload OpenGL context
@@ -883,6 +887,8 @@ void BeginDrawing(void)
     rlLoadIdentity();                   // Reset current matrix (modelview)
     rlMultMatrixf(MatrixToFloat(CORE.Window.screenScale)); // Apply screen scaling
 
+    BeginTextureMode(gLogicalTarget);
+
     //rlTranslatef(0.375, 0.375, 0);    // HACK to have 2D pixel-perfect drawing on OpenGL 1.1
                                         // NOTE: Not required with OpenGL 3.3+
 }
@@ -890,7 +896,14 @@ void BeginDrawing(void)
 // End canvas drawing and swap buffers (double buffering)
 void EndDrawing(void)
 {
+    EndTextureMode();
+    Rectangle src = {0.0, 0.0, 2160.0, -1080.0};
+    Rectangle dest = {540.0, 1080.0, 2160.0, 1080.0};
+    Vector2 origin = { 1080.0, 540.0 };
+    DrawTexturePro(gLogicalTarget.texture, src, dest, origin, 90.0, WHITE);
+
     rlDrawRenderBatchActive();      // Update and draw internal render batch
+
 
 #if defined(SUPPORT_GIF_RECORDING)
     // Draw record indicator
