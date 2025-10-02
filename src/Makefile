@@ -489,6 +489,9 @@ endif
 ifeq ($(TARGET_PLATFORM),PLATFORM_DESKTOP_SDL)
     INCLUDE_PATHS += -I$(SDL_INCLUDE_PATH)
 endif
+ifeq ($(TARGET_PLATFORM),PLATFORM_COMMA)
+    INCLUDE_PATHS += -I/usr/include/libdrm
+endif
 ifeq ($(TARGET_PLATFORM),PLATFORM_WEB)
     INCLUDE_PATHS += -Iexternal/glfw/include
 endif

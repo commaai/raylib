@@ -343,7 +343,7 @@ static int set_screen_brightness() {
 }   
 
 static int init_screen () {
-  glClearColor(1, 0, 0, 1);
+  glClearColor(0, 0, 0, 1);
   glClear(GL_COLOR_BUFFER_BIT);
   eglSwapBuffers(platform.egl.display, platform.egl.surface);
 
@@ -648,23 +648,23 @@ void SwapScreenBuffer(void) {
   platform.gbm.next_bo = gbm_surface_lock_front_buffer(platform.gbm.surface);
   if (!platform.gbm.next_bo) {
     TRACELOG(LOG_WARNING, "COMMA: Failed to get rendered buffer object");
-    continue;
+    return;
   }
 
   if (get_or_create_fb_for_bo(platform.gbm.next_bo, &platform.gbm.next_fb)) {
     gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
     platform.gbm.next_bo = NULL;
     TRACELOG(LOG_WARNING, "COMMA: Failed to get frame buffer for rendered buffer object");
-    continue;
+    return;
   }
 
   if (drmModePageFlip(platform.drm.fd, platform.drm.crtc_id, platform.gbm.next_fb, 0, NULL) != 0) {
     TRACELOG(LOG_WARNING, "COMMA: ");
-    drmModeRmFB(platform.drm.fd, platform.drm.next_fb);
+    drmModeRmFB(platform.drm.fd, platform.gbm.next_fb);
     gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
     platform.gbm.next_bo = NULL;
     platform.gbm.next_fb = 0;
-    continue;
+    return;
   }
 
   drmVBlank v = {0};
@@ -844,6 +844,9 @@ int InitPlatform(void) {
   rlLoadExtensions(eglGetProcAddress);
   InitTimer();
   CORE.Storage.basePath = GetWorkingDirectory();
+
+  CORE.Window.screen.width = 2160;
+  CORE.Window.screen.height = 1080;
 
   TRACELOG(LOG_INFO, "COMMA: Initialized successfully");
   return 0;
