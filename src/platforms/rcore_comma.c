@@ -94,16 +94,34 @@ struct egl_platform {
   EGLContext context;
   EGLConfig config;
 
-  EGLNativeDisplayType native_display;
-  EGLNativeWindowType native_window;
-
   int native_window_width;
   int native_window_height;
+};
+
+// hold all the low level drm stuff
+struct drm_platform {
+  int fd;
+
+  uint32_t connector_id;
+  uint32_t crtc_id;
+
+  drmModeModeInfo mode;
+};
+
+// hold all the low level gbm stuff
+struct gbm_platform {
+  struct gbm_surface *surface;
+  struct gbm_bo *current_bo;
+  struct gbm_bo *next_bo;
+  uint32_t current_fb;
+  uint32_t next_fb;
 };
 
 typedef struct {
     struct egl_platform egl;
     struct touch touch;
+    struct drm_platform drm;
+    struct gbm_platform gbm;
     bool canonical_zero;
 } PlatformData;
 
@@ -141,14 +159,37 @@ const char *eglGetErrorString(EGLint error) {
 }
 #undef CASE_STR
 
-static int init_magic () {
-  return 0;
+static int init_drm (const char *dev_path) {
+  platform.drm.fd = open(dev_path, O_RDONLY | O_NONBLOCK);
+  if (platform.drm.fd < 0) {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to open drm device at %s", dev_path);
+    return -1;
+  }
+
+  drmModeConnector *connector = NULL;
+  drmModeRes *res = drmModeGetResources(platform.drm.fd);
+  for (int i = 0; i < res->count_connectors; i++) {
+    connector = drmModeGetConnector(platform.drm.fd, res->connectors[i]);
+    if (connector->connection == DRM_MODE_CONNECTED && connector->count_modes > 0) {
+      break;
+    }
+    drmModeFreeConnector(connector);
+    connector = NULL;
+  }
+  if (!connector) {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to get a drm connector");
+    return -1;
+  }
+
+  platform.drm.connector_id = connector->connector_id;
+  platform.drm.mode = connector->modes[0];
+  platform.drm.crtc_id = res->crtcs[0];
 }
 
 static int init_egl () {
    EGLint major;
    EGLint minor;
-   EGLConfig config;
+   EGLConfig config = NULL;
    EGLint num_config;
    EGLint frame_buffer_config [] = {
      EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
@@ -162,8 +203,13 @@ static int init_egl () {
    // ask for an OpenGL ES 2 rendering context
    EGLint context_config [] = { EGL_CONTEXT_MAJOR_VERSION, 2, EGL_NONE, EGL_NONE };
 
-   // get an egl display with our native display (in our case, a wl_display)
-   platform.egl.display = eglGetDisplay(platform.egl.native_display);
+   struct gbm_device *gbm = gbm_create_device(platform.drm.fd);
+   if (!gbm) {
+     TRACELOG(LOG_WARNING, "COMMA: Failed to create gbm device");
+     return -1;
+   }
+
+   platform.egl.display = eglGetDisplay(gbm);
    if (platform.egl.display == EGL_NO_DISPLAY) {
      TRACELOG(LOG_WARNING, "COMMA: Failed to get an EGL display");
      return -1;
@@ -175,13 +221,46 @@ static int init_egl () {
    }
    TRACELOG(LOG_INFO, "COMMA: Using EGL version %i.%i", major, minor);
 
-   if (!eglChooseConfig(platform.egl.display, frame_buffer_config, &config, 1, &num_config)) {
-     TRACELOG(LOG_WARNING, "COMMA: Failed to get a valid EGL display config. Error code: %s", eglGetErrorString(eglGetError()));
+   if (!eglGetConfigs(platform.egl.display, NULL, 0, &num_config) || num_config < 1) {
+     TRACELOG(LOG_WARNING, "COMMA: Failed to list EGL display configs. Error code: %s", eglGetErrorString(eglGetError()));
      return -1;
    }
-   TRACELOG(LOG_INFO, "COMMA: Found %i valid EGL display configs", num_config);
 
-   platform.egl.surface = eglCreateWindowSurface(platform.egl.display, config, platform.egl.native_window, NULL);
+   EGLConfig *configs = malloc(num_config * sizeof(EGLConfig));
+   if (!eglChooseConfig(platform.egl.display, frame_buffer_config, configs, num_config, &num_config)) {
+     TRACELOG(LOG_WARNING, "%s", eglGetErrorString(eglGetError()));
+     return -1;
+   }
+   if (num_config == 0) {
+     TRACELOG(LOG_WARNING, "%s", eglGetErrorString(eglGetError()));
+     return -1;
+   }
+
+   for (int i = 0; i < num_config; ++i) {
+     EGLint gbm_format;
+     if (!eglGetConfigAttrib(platform.egl.display, configs[i], EGL_NATIVE_VISUAL_ID, &gbm_format)) {
+       continue;
+     }
+
+     if (gbm_format == GBM_FORMAT_ABGR8888) {
+       config = configs[i];
+       free(configs);
+       break;
+     }
+   }
+
+   if (config == NULL) {
+     TRACELOG(LOG_WARNING, "COMMA: Failed to find correct config");
+     return -1;
+   }
+
+   platform.gbm.surface = gbm_surface_create(gbm, platform.drm.mode.hdisplay, platform.drm.mode.vdisplay, GBM_FORMAT_ABGR8888, GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+   if (!platform.gbm.surface) {
+     TRACELOG(LOG_WARNING, "COMMA: Failed to create gbm surface");
+     return -1;
+   }
+
+   platform.egl.surface = eglCreateWindowSurface(platform.egl.display, config, (EGLNativeDisplayType)platform.gbm.surface, NULL);
    if (platform.egl.surface == EGL_NO_SURFACE) {
      TRACELOG(LOG_WARNING, "COMMA: Failed to create an EGL surface. Error code: %s", eglGetErrorString(eglGetError()));
      return -1;
@@ -204,10 +283,89 @@ static int init_egl () {
      return -1;
    }
 
-   // enable depth testing. Not necessary if only doing 2D
-   glEnable(GL_DEPTH_TEST);
-
    return 0;
+}
+
+static void bo_user_data_destroy(struct gbm_bo *bo, void *user_data) {
+  uint32_t fb_id = (uint32_t)(uintptr_t)user_data;
+  if (fb_id) {
+    drmModeRmFB(platform.drm.fd, fb_id);
+  }
+}
+
+static int get_or_create_fb_for_bo(struct gbm_bo *bo, uint32_t *out_fb) {     
+    void *user_data = gbm_bo_get_user_data(bo);
+    if (user_data) {
+      *out_fb = (uint32_t)(uintptr_t)fb;
+      return 0;
+    }
+
+    uint32_t w = gbm_bo_get_width(bo);
+    uint32_t h = gbm_bo_get_height(bo);
+    uint32_t stride = gbm_bo_get_stride(bo);
+    uint32_t handle = gbm_bo_get_handle(bo).u32;
+      
+    uint32_t handles[4] = { handle };
+    uint32_t pitches[4] = { stride };
+    uint32_t offsets[4] = { 0 };
+    uint32_t fb_id = 0;
+
+    if (drmModeAddFB2(platform.drm.fd, w, h, GBM_FORMAT_ABGR8888, handles, pitches, offsets, &fb_id, 0) != 0) {
+      return -1;
+    }     
+          
+    gbm_bo_set_user_data(bo, (void*)(uintptr_t)fb_id, bo_user_data_destroy);
+
+    *out_fb = fb_id;
+    return 0;
+}
+
+static int set_screen_brightness() { 
+  const char *path = "/sys/devices/platform/soc/ae00000.qcom,mdss_mdp/backlight/panel0-backlight/brightness";
+  const char *value = "1023\n";
+  int fd_b;
+    
+  fd_b = open(path, O_WRONLY);
+  if (fd_b < 0) {
+    perror("open");
+    return 1;
+  } 
+      
+  if (write(fd_b, value, sizeof("1023\n") - 1) < 0) {
+    perror("write");
+    close(fd_b);
+    return 1;
+  } 
+  close(fd_b);
+}   
+
+static int init_screen () {
+  glClearColor(0, 0, 0, 1);
+  glClear(GL_COLOR_BUFFER_BIT);
+  eglSwapBuffers(platform.egl.display, platform.egl.surface);
+
+  platform.gbm.current_bo = gbm_surface_lock_front_buffer(platform.gbm.surface);
+  if (!platform.gbm.current_bo) {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to get initial front buffer object");
+    return -1;
+  }
+
+  if (get_or_create_fb_for_bo(platform.gbm.current_bo, &platform.gbm.current_fb)) {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to get initial frame buffer");
+    return -1;
+  }
+
+  if (drmModeSetCrtc(platform.drm.fd, platform.drm.crtc_id, platform.gbm.current_fb, 0, 0, &platform.drm.connector_id, 1, &platform.drm.mode)) {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to set CRTC");
+    return -1;
+  }
+
+  if (set_screen_brightness()) {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to set screen brightness");
+    return -1;
+  }
+
+  return 0;
 }
 
 static int init_touch(const char *dev_path) {
@@ -626,8 +784,18 @@ int InitPlatform(void) {
   CORE.Window.render.width = CORE.Window.screen.width;
   CORE.Window.render.height = CORE.Window.screen.height;
 
-  if (init_magic()) {
+  if (init_drm()) {
+    TRACELOG(LOG_FATAL, "COMMA: Failed to initialize drm");
+    return -1;
+  }
+
+  if (init_egl()) {
     TRACELOG(LOG_FATAL, "COMMA: Failed to initialize EGL");
+    return -1;
+  }
+
+  if (init_screen()) {
+    TRACELOG(LOG_FATAL, "COMMA: Failed to initialize screen");
     return -1;
   }
 
