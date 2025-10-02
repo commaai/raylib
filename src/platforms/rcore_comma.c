@@ -644,6 +644,39 @@ void DisableCursor(void) {
 // Swap back buffer with front buffer (screen drawing)
 void SwapScreenBuffer(void) {
   eglSwapBuffers(platform.egl.display, platform.egl.surface);
+
+  platform.gbm.next_bo = gbm_surface_lock_front_buffer(platform.gbm.surface);
+  if (!platform.gbm.next_bo) {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to get rendered buffer object");
+    continue;
+  }
+
+  if (get_or_create_fb_for_bo(platform.gbm.next_bo, &platform.gbm.next_fb)) {
+    gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
+    platform.gbm.next_bo = NULL;
+    TRACELOG(LOG_WARNING, "COMMA: Failed to get frame buffer for rendered buffer object");
+    continue;
+  }
+
+  if (drmModePageFlip(platform.drm.fd, platform.drm.crtc_id, platform.gbm.next_fb, 0, NULL) != 0) {
+    TRACELOG(LOG_WARNING, "COMMA: ");
+    drmModeRmFB(platform.drm.fd, platform.drm.next_fb);
+    gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
+    platform.gbm.next_bo = NULL;
+    platform.gbm.next_fb = 0;
+    continue;
+  }
+
+  drmVBlank v = {0};
+  v.request.type = DRM_VBLANK_RELATIVE;
+  v.request.sequence = 1;
+  drmWaitVBlank(platform.drm.fd, &v);
+
+  if (platform.gbm.current_bo) {
+    gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.current_bo);
+  }
+
+  platform.gbm.current_bo = platform.gbm.next_bo;
 }
 
 //----------------------------------------------------------------------------------
