@@ -845,8 +845,9 @@ int InitPlatform(void) {
   InitTimer();
   CORE.Storage.basePath = GetWorkingDirectory();
 
-  CORE.Window.screen.width = 2160;
-  CORE.Window.screen.height = 1080;
+  int tmp = CORE.Window.screen.width;
+  CORE.Window.screen.width = CORE.Window.screen.height;
+  CORE.Window.screen.width = tmp;
 
   TRACELOG(LOG_INFO, "COMMA: Initialized successfully");
   return 0;
