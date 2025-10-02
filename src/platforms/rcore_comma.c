@@ -54,15 +54,16 @@
 
 #include <linux/input.h>
 
-#include <wayland-client.h>
-#include <wayland-server.h>
-#include <wayland-client-protocol.h>
-#include <wayland-egl.h> // must be included before the EGL headers
-
 #include <EGL/egl.h>
 #include <EGL/eglplatform.h>
 
 #include <GLES2/gl2.h>
+
+#include <gbm.h>
+
+#include <xf86drm.h>
+#include <xf86drmMode.h>
+
 
 //----------------------------------------------------------------------------------
 // Types and Structures Definition
@@ -86,18 +87,6 @@ struct touch {
   int fd;
 };
 
-// hold all the low level wayland stuff
-struct wayland_platform {
-  struct wl_compositor *wl_compositor;
-  struct wl_surface *wl_surface;
-  struct wl_egl_window *wl_egl_window;
-  struct wl_region *wl_region;
-  struct wl_shell *wl_shell;
-  struct wl_shell_surface *wl_shell_surface;
-  struct wl_display *wl_display;
-  struct wl_registry *wl_registry;
-};
-
 // hold all the low level egl stuff
 struct egl_platform {
   EGLDisplay display;
@@ -113,7 +102,6 @@ struct egl_platform {
 };
 
 typedef struct {
-    struct wayland_platform wayland;
     struct egl_platform egl;
     struct touch touch;
     bool canonical_zero;
@@ -153,102 +141,7 @@ const char *eglGetErrorString(EGLint error) {
 }
 #undef CASE_STR
 
-void wl_shell_surface_handle_ping (void *data, struct wl_shell_surface *shell_surface, uint32_t serial) {
-  wl_shell_surface_pong(shell_surface, serial);
-}
-
-void wl_shell_surface_handle_configure (void *data, struct wl_shell_surface *shell_surface, uint32_t edges, int32_t width, int32_t height) {
-  wl_egl_window_resize(platform.egl.native_window, width, height, 0, 0);
-}
-
-void wl_shell_surface_handle_popup_done(void *data, struct wl_shell_surface *shell_surface) {
-}
-
-static struct wl_shell_surface_listener wl_shell_surface_listener = {
-  .ping = &wl_shell_surface_handle_ping,
-  .configure = &wl_shell_surface_handle_configure,
-  .popup_done = &wl_shell_surface_handle_popup_done
-};
-
-static void wl_registry_handle_global (void *data, struct wl_registry *registry, uint32_t id, const char *interface, uint32_t version) {
-  if (!strcmp(interface, "wl_compositor")) {
-    // Need version 3 of wl_compositor in order to do the rotation transform with wl_surface_set_buffer_transform
-    platform.wayland.wl_compositor = wl_registry_bind(registry, id, &wl_compositor_interface, 3);
-  } else if (!strcmp(interface, "wl_shell")) {
-    platform.wayland.wl_shell = wl_registry_bind(registry, id, &wl_shell_interface, 1);
-  }
-}
-
-static void wl_registry_handle_global_remove (void *data, struct wl_registry *registry, uint32_t id) {
-}
-
-const struct wl_registry_listener wl_registry_listener = {
-  .global = wl_registry_handle_global,
-  .global_remove = wl_registry_handle_global_remove
-};
-
-static int init_wayland(int width, int height) {
-  platform.wayland.wl_display = wl_display_connect(NULL);
-  if (platform.wayland.wl_display == NULL) {
-    TRACELOG(LOG_WARNING, "COMMA: Failed to create a Wayland display. Failed with: %s", strerror(errno));
-    return -1;
-  }
-
-  platform.wayland.wl_compositor = NULL;
-  platform.wayland.wl_shell = NULL;
-
-  platform.wayland.wl_registry = wl_display_get_registry(platform.wayland.wl_display);
-  wl_registry_add_listener(platform.wayland.wl_registry, &wl_registry_listener, NULL);
-
-  wl_display_dispatch(platform.wayland.wl_display);
-  wl_display_roundtrip(platform.wayland.wl_display);
-
-  if (platform.wayland.wl_compositor == NULL || platform.wayland.wl_compositor == NULL) {
-    TRACELOG(LOG_WARNING, "COMMA: Failed to bind Wayland globals");
-    return -1;
-  }
-
-  // create a surface with a buffer to do render on it
-  platform.wayland.wl_surface = wl_compositor_create_surface(platform.wayland.wl_compositor);
-
-  FILE *fp = fopen("/sys/devices/platform/vendor/vendor:gpio-som-id/som_id", "r");
-  if (fp != NULL) {
-    int origin;
-    int ret = fscanf(fp, "%d", &origin);
-    fclose(fp);
-    if (ret != 1) {
-      TRACELOG(LOG_WARNING, "COMMA: Failed to test for screen origin");
-      return -1;
-    } else {
-      platform.canonical_zero = origin == 1;
-    }
-  } else {
-    TRACELOG(LOG_WARNING, "COMMA: Failed to open screen origin");
-    return -1;
-  }
-
-  // apply rotation transform to the buffer of the surface
-  wl_surface_set_buffer_transform(platform.wayland.wl_surface, platform.canonical_zero ? WL_OUTPUT_TRANSFORM_90 : WL_OUTPUT_TRANSFORM_270);
-
-  platform.wayland.wl_shell_surface = wl_shell_get_shell_surface(platform.wayland.wl_shell, platform.wayland.wl_surface);
-  wl_shell_surface_add_listener(platform.wayland.wl_shell_surface, &wl_shell_surface_listener, NULL);
-  wl_shell_surface_set_toplevel(platform.wayland.wl_shell_surface);
-
-  platform.wayland.wl_region = wl_compositor_create_region(platform.wayland.wl_compositor);
-  wl_region_add(platform.wayland.wl_region, 0, 0, width, height);
-  wl_surface_set_opaque_region(platform.wayland.wl_surface, platform.wayland.wl_region);
-
-  // the native window for egl is a our wl_surface
-  platform.egl.native_window = wl_egl_window_create(platform.wayland.wl_surface, width, height);
-  if (platform.egl.native_window == NULL) {
-    TRACELOG(LOG_WARNING, "COMMA: Failed to create a Wayland EGL window");
-    return -1;
-  }
-  // the native display for egl is a our wl_display
-  platform.egl.native_display = platform.wayland.wl_display;
-  platform.egl.native_window_width = width;
-  platform.egl.native_window_height = height;
-
+static int init_magic () {
   return 0;
 }
 
@@ -321,6 +214,22 @@ static int init_touch(const char *dev_path) {
   platform.touch.fd = open(dev_path, O_RDONLY|O_NONBLOCK);
   if (platform.touch.fd < 0) {
     TRACELOG(LOG_WARNING, "COMMA: Failed to open touch device at %s", dev_path);
+    return -1;
+  }
+
+  FILE *fp = fopen("/sys/devices/platform/vendor/vendor:gpio-som-id/som_id", "r");
+  if (fp != NULL) {
+    int origin;
+    int ret = fscanf(fp, "%d", &origin);
+    fclose(fp);
+    if (ret != 1) {
+      TRACELOG(LOG_WARNING, "COMMA: Failed to test for screen origin");
+      return -1;
+    } else {
+      platform.canonical_zero = origin == 1;
+    }
+  } else {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to open screen origin");
     return -1;
   }
 
@@ -717,12 +626,7 @@ int InitPlatform(void) {
   CORE.Window.render.width = CORE.Window.screen.width;
   CORE.Window.render.height = CORE.Window.screen.height;
 
-  if (init_wayland(CORE.Window.currentFbo.width, CORE.Window.currentFbo.height)) {
-    TRACELOG(LOG_FATAL, "COMMA: Failed to initialize Wayland");
-    return -1;
-  }
-
-  if (init_egl()) {
+  if (init_magic()) {
     TRACELOG(LOG_FATAL, "COMMA: Failed to initialize EGL");
     return -1;
   }

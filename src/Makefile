@@ -636,7 +636,7 @@ ifeq ($(TARGET_PLATFORM),PLATFORM_DRM)
     endif
 endif
 ifeq ($(TARGET_PLATFORM),PLATFORM_COMMA)
-    LDLIBS = -lGLESv2 -lEGL -lGL -lpthread -lrt -lm -ldl
+    LDLIBS = -lGLESv2 -lEGL -lGL -lpthread -lrt -lm -ldl -lgbm -ldrm
     ifeq ($(RAYLIB_MODULE_AUDIO),TRUE)
         LDLIBS += -latomic
     endif
