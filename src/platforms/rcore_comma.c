@@ -641,6 +641,8 @@ void DisableCursor(void) {
   CORE.Input.Mouse.cursorHidden = true;
 }
 
+int prev_s = 0;
+
 // Swap back buffer with front buffer (screen drawing)
 void SwapScreenBuffer(void) {
   eglSwapBuffers(platform.egl.display, platform.egl.surface);
@@ -671,6 +673,13 @@ void SwapScreenBuffer(void) {
   v.request.type = DRM_VBLANK_RELATIVE;
   v.request.sequence = 1;
   drmWaitVBlank(platform.drm.fd, &v);
+  int delta = v.reply.sequence - prev_s;
+  if (delta > 1) {
+    printf("CURRENT VBLANK: %i\n", v.reply.sequence);
+    printf("PREV VBLANK: %i\n", prev_s);
+    printf("DIFF: %i\n", delta);
+  }
+  prev_s = v.reply.sequence;
 
   if (platform.gbm.current_bo) {
     gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.current_bo);
@@ -847,7 +856,7 @@ int InitPlatform(void) {
 
   int tmp = CORE.Window.screen.width;
   CORE.Window.screen.width = CORE.Window.screen.height;
-  CORE.Window.screen.width = tmp;
+  CORE.Window.screen.height = tmp;
 
   TRACELOG(LOG_INFO, "COMMA: Initialized successfully");
   return 0;
