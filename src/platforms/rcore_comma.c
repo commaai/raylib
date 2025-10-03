@@ -426,7 +426,7 @@ static int init_egl () {
      return -1;
    }
 
-   platform.egl.surface = eglCreateWindowSurface(platform.egl.display, config, (EGLNativeDisplayType)platform.gbm.surface, NULL);
+   platform.egl.surface = eglCreateWindowSurface(platform.egl.display, config, (EGLNativeWindowType)platform.gbm.surface, NULL);
    if (platform.egl.surface == EGL_NO_SURFACE) {
      TRACELOG(LOG_WARNING, "COMMA: Failed to create an EGL surface. Error code: %s", eglGetErrorString(eglGetError()));
      return -1;
@@ -522,8 +522,6 @@ static int init_screen () {
   CORE.Window.rotation_destination = (Rectangle){CORE.Window.screen.height/2, CORE.Window.screen.width/2, CORE.Window.screen.width, CORE.Window.screen.height};
   CORE.Window.rotation_origin = (Vector2){CORE.Window.screen.width/2, CORE.Window.screen.height/2};
 
-  glClearColor(1, 0, 0, 1);
-  glClear(GL_COLOR_BUFFER_BIT);
   eglSwapBuffers(platform.egl.display, platform.egl.surface);
 
   platform.gbm.current_bo = gbm_surface_lock_front_buffer(platform.gbm.surface);
@@ -820,8 +818,6 @@ void DisableCursor(void) {
   CORE.Input.Mouse.cursorHidden = true;
 }
 
-int prev_s = 0;
-
 // Swap back buffer with front buffer (screen drawing)
 void SwapScreenBuffer(void) {
   eglSwapBuffers(platform.egl.display, platform.egl.surface);
@@ -852,13 +848,6 @@ void SwapScreenBuffer(void) {
   v.request.type = DRM_VBLANK_RELATIVE;
   v.request.sequence = 1;
   drmWaitVBlank(platform.drm.fd, &v);
-  int delta = v.reply.sequence - prev_s;
-  if (delta > 1) {
-    printf("CURRENT VBLANK: %i\n", v.reply.sequence);
-    printf("PREV VBLANK: %i\n", prev_s);
-    printf("DIFF: %i\n", delta);
-  }
-  prev_s = v.reply.sequence;
 
   if (platform.gbm.current_bo) {
     gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.current_bo);
