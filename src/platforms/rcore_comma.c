@@ -159,6 +159,170 @@ const char *eglGetErrorString(EGLint error) {
 }
 #undef CASE_STR
 
+
+// These are actually float16s, so need to be converted before use
+struct __attribute__((__packed__)) color_correction_values {
+  uint16_t gamma;
+  uint16_t ccm[9];
+  uint16_t rgb_color_gains[3];
+};
+
+static const char *color_correction_fragment_shader_template =
+    "#version 100\n"
+    "precision mediump float;\n"
+    "varying vec2 fragTexCoord;\n"
+    "varying vec4 fragColor;\n"
+    "uniform sampler2D texture0;\n"
+    "uniform vec4 colDiffuse;\n"
+    "void main() {\n"
+    "    vec4 c = texture2D(texture0, fragTexCoord) * fragColor * colDiffuse;\n"
+    "    c.rgb = pow(c.rgb, vec3(2.2, 2.2, 2.2));\n"
+    "    c.r *= %f;\n"
+    "    c.g *= %f;\n"
+    "    c.b *= %f;\n"
+    "    vec3 rgb_cc = vec3(0.0, 0.0, 0.0);\n"
+    "    rgb_cc += c.r * vec3(%f, %f, %f);\n"
+    "    rgb_cc += c.g * vec3(%f, %f, %f);\n"
+    "    rgb_cc += c.b * vec3(%f, %f, %f);\n"
+    "    c.rgb = rgb_cc;\n"
+    "    c.rgb = pow(c.rgb, vec3(%f/2.2, %f/2.2, %f/2.2));\n"
+    "    gl_FragColor = c;\n"
+    "}\n";
+
+float decode_float16(uint16_t value){
+  uint32_t sign = value >> 15;
+  uint32_t exponent = (value >> 10) & 0x1F;
+  uint32_t fraction = (value & 0x3FF);
+  uint32_t output;
+  if (exponent == 0){
+    if (fraction == 0){
+      // Zero
+      output = (sign << 31);
+    } else {
+      exponent = 127 - 14;
+      while ((fraction & (1 << 10)) == 0) {
+        exponent--;
+        fraction <<= 1;
+      }
+      fraction &= 0x3FF;
+      output = (sign << 31) | (exponent << 23) | (fraction << 13);
+    }
+  } else if (exponent == 0x1F) {
+    // Inf or NaN
+    output = (sign << 31) | (0xFF << 23) | (fraction << 13);
+  } else {
+    // Regular
+    output = (sign << 31) | ((exponent + (127-15)) << 23) | (fraction << 13);
+  }
+
+  return *((float*)&output);
+}
+
+struct color_correction_values * read_correction_values(void) {
+  int ret;
+  FILE *f = NULL;
+  struct color_correction_values *ccv = NULL;
+
+  if (getenv("DISABLE_COLOR_CORRECTION")) {
+    TRACELOG(LOG_WARNING, "COMMA: Color correction disabled by flag");
+    goto err;
+  }
+
+  ccv = malloc(sizeof(struct color_correction_values));
+  if (ccv == NULL) {
+    TRACELOG(LOG_WARNING, "COMMA: CCV allocation failed...");
+    goto err;
+  }
+
+  const char *cal_paths[] = {
+    getenv("COLOR_CORRECTION_PATH"),
+    "/data/misc/display/color_cal/color_cal",
+    "/sys/devices/platform/soc/894000.i2c/i2c-2/2-0017/color_cal",
+    "/persist/comma/color_cal",
+  };
+  for (int i = 0; i < sizeof(cal_paths) / sizeof(const char *); i++) {
+    const char *cal_fn = cal_paths[i];
+    if (cal_fn == NULL) {
+      continue;
+    }
+
+    TRACELOG(LOG_INFO, "COMMA: Color calibration trying %s", cal_fn);
+    f = fopen(cal_fn, "r");
+    if (f == NULL) {
+      TRACELOG(LOG_WARNING, "COMMA: - unable to open %s", cal_fn);
+      continue;
+    }
+
+    ret = fread(ccv, sizeof(struct color_correction_values), 1, f);
+    fclose(f);
+    if (ret == 1) {
+      return ccv;
+    } else {
+      TRACELOG(LOG_WARNING, "COMMA: - file too short");
+    }
+  }
+
+  TRACELOG(LOG_WARNING, "COMMA: No color calibraion files found");
+
+err:
+  if (f != NULL) fclose(f);
+  if (ccv != NULL) free(ccv);
+  return NULL;
+}
+
+static int init_color_correction(void) {
+  int ret;
+  char *shader = NULL;
+  struct color_correction_values *ccv = NULL;
+
+  shader = malloc(1024);
+  if(shader == NULL){
+    TRACELOG(LOG_WARNING, "COMMA: Failed to malloc color correction");
+    goto err;
+  }
+
+  ccv = read_correction_values();
+  if(ccv == NULL){
+    TRACELOG(LOG_WARNING, "COMMA: No color correction values found");
+    goto err;
+  }
+
+  ret = sprintf(shader,
+    color_correction_fragment_shader_template,
+    (1.0/decode_float16(ccv->rgb_color_gains[0])),
+    (1.0/decode_float16(ccv->rgb_color_gains[1])),
+    (1.0/decode_float16(ccv->rgb_color_gains[2])),
+    decode_float16(ccv->ccm[0]),
+    decode_float16(ccv->ccm[1]),
+    decode_float16(ccv->ccm[2]),
+    decode_float16(ccv->ccm[3]),
+    decode_float16(ccv->ccm[4]),
+    decode_float16(ccv->ccm[5]),
+    decode_float16(ccv->ccm[6]),
+    decode_float16(ccv->ccm[7]),
+    decode_float16(ccv->ccm[8]),
+    (1.0/decode_float16(ccv->gamma)),
+    (1.0/decode_float16(ccv->gamma)),
+    (1.0/decode_float16(ccv->gamma))
+  );
+
+  if(ret < 0){
+    TRACELOG(LOG_WARNING, "COMMA: Color correction sprintf failed");
+    goto err;
+  }
+
+  TRACELOG(LOG_INFO, "COMMA: Successfully setup color correction");
+  free(ccv);
+
+  CORE.Window.cc_shader_src = shader;
+  return 0;
+
+err:
+  if (ccv != NULL) free(ccv);
+  if (shader != NULL) free(shader);
+  return -1;
+}
+
 static int init_drm (const char *dev_path) {
   platform.drm.fd = open(dev_path, O_RDONLY | O_NONBLOCK);
   if (platform.drm.fd < 0) {
@@ -856,6 +1020,10 @@ int InitPlatform(void) {
   if (init_touch("/dev/input/event2")) {
     TRACELOG(LOG_FATAL, "COMMA: Failed to initialize touch device");
     return -1;
+  }
+
+  if (init_color_correction()) {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to initialize color correction");
   }
 
   SetupFramebuffer(CORE.Window.currentFbo.width, CORE.Window.currentFbo.height);

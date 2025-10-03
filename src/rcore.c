@@ -282,6 +282,8 @@ typedef struct CoreData {
         bool usingFbo;                      // Using FBO (RenderTexture) for rendering instead of default framebuffer
 
         int rot;
+        Shader cc_shader;
+        char *cc_shader_src;
 
         Point position;                     // Window position (required on fullscreen toggle)
         Point previousPosition;             // Window previous position (required on borderless windowed toggle)
@@ -732,6 +734,11 @@ void InitWindow(int width, int height, const char *title)
     LOGI_H = CORE.Window.screen.height;
     PHYS_W = CORE.Window.screen.height;
     PHYS_H = CORE.Window.screen.width;
+
+    CORE.Window.cc_shader = LoadShaderFromMemory(NULL, CORE.Window.cc_shader_src);
+    if (!IsShaderValid(CORE.Window.cc_shader)) {
+      TraceLog(LOG_ERROR, "COMMA: Failed to build color correction shader");
+    }
 }
 
 // Close window and unload OpenGL context
@@ -896,10 +903,10 @@ void BeginDrawing(void)
     rlMultMatrixf(MatrixToFloat(CORE.Window.screenScale)); // Apply screen scaling
 
     BeginTextureMode(gLogicalTarget);
-
     //rlTranslatef(0.375, 0.375, 0);    // HACK to have 2D pixel-perfect drawing on OpenGL 1.1
                                         // NOTE: Not required with OpenGL 3.3+
 }
+
 
 // End canvas drawing and swap buffers (double buffering)
 void EndDrawing(void)
@@ -910,7 +917,10 @@ void EndDrawing(void)
     Rectangle src = {0.0, 0.0, LOGI_W, -LOGI_H};
     Rectangle dest = {PHYS_W/2, PHYS_H/2, LOGI_W, LOGI_H};
     Vector2 origin = { LOGI_W/2, LOGI_H/2 };
-    DrawTexturePro(gLogicalTarget.texture, src, dest, origin, CORE.Window.rot, WHITE);
+
+    BeginShaderMode(CORE.Window.cc_shader);
+      DrawTexturePro(gLogicalTarget.texture, src, dest, origin, CORE.Window.rot, WHITE);
+    EndShaderMode();
 
     rlDrawRenderBatchActive();
     rlEnableColorBlend();
