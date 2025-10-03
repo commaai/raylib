@@ -281,6 +281,8 @@ typedef struct CoreData {
         bool eventWaiting;                  // Wait for events before ending frame
         bool usingFbo;                      // Using FBO (RenderTexture) for rendering instead of default framebuffer
 
+        int rot;
+
         Point position;                     // Window position (required on fullscreen toggle)
         Point previousPosition;             // Window previous position (required on borderless windowed toggle)
         Size display;                       // Display width and height (monitor, device-screen, LCD, ...)
@@ -908,7 +910,7 @@ void EndDrawing(void)
     Rectangle src = {0.0, 0.0, LOGI_W, -LOGI_H};
     Rectangle dest = {PHYS_W/2, PHYS_H/2, LOGI_W, LOGI_H};
     Vector2 origin = { LOGI_W/2, LOGI_H/2 };
-    DrawTexturePro(gLogicalTarget.texture, src, dest, origin, 90.0, WHITE);
+    DrawTexturePro(gLogicalTarget.texture, src, dest, origin, CORE.Window.rot, WHITE);
 
     rlDrawRenderBatchActive();
     rlEnableColorBlend();

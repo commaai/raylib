@@ -397,6 +397,7 @@ static int init_touch(const char *dev_path) {
       return -1;
     } else {
       platform.canonical_zero = origin == 1;
+      CORE.Window.rot = platform.canonical_zero ? 270 : 90;
     }
   } else {
     TRACELOG(LOG_WARNING, "COMMA: Failed to open screen origin");
