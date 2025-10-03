@@ -903,13 +903,15 @@ void BeginDrawing(void)
 void EndDrawing(void)
 {
     EndTextureMode();
+    rlDisableColorBlend();
 
     Rectangle src = {0.0, 0.0, LOGI_W, -LOGI_H};
     Rectangle dest = {PHYS_W/2, PHYS_H/2, LOGI_W, LOGI_H};
     Vector2 origin = { LOGI_W/2, LOGI_H/2 };
     DrawTexturePro(gLogicalTarget.texture, src, dest, origin, 90.0, WHITE);
 
-    rlDrawRenderBatchActive();      // Update and draw internal render batch
+    rlDrawRenderBatchActive();
+    rlEnableColorBlend();
 
 
 #if defined(SUPPORT_GIF_RECORDING)
