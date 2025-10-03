@@ -306,7 +306,7 @@ static int get_or_create_fb_for_bo(struct gbm_bo *bo, uint32_t *out_fb) {
     uint32_t h = gbm_bo_get_height(bo);
     uint32_t stride = gbm_bo_get_stride(bo);
     uint32_t handle = gbm_bo_get_handle(bo).u32;
-      
+
     uint32_t handles[4] = { handle };
     uint32_t pitches[4] = { stride };
     uint32_t offsets[4] = { 0 };
@@ -314,33 +314,42 @@ static int get_or_create_fb_for_bo(struct gbm_bo *bo, uint32_t *out_fb) {
 
     if (drmModeAddFB2(platform.drm.fd, w, h, GBM_FORMAT_ABGR8888, handles, pitches, offsets, &fb_id, 0) != 0) {
       return -1;
-    }     
-          
+    }
+
     gbm_bo_set_user_data(bo, (void*)(uintptr_t)fb_id, bo_user_data_destroy);
 
     *out_fb = fb_id;
     return 0;
 }
 
-static int set_screen_brightness() { 
-  const char *path = "/sys/devices/platform/soc/ae00000.qcom,mdss_mdp/backlight/panel0-backlight/brightness";
-  const char *value = "1023\n";
-  int fd_b;
-    
-  fd_b = open(path, O_WRONLY);
-  if (fd_b < 0) {
-    perror("open");
-    return 1;
-  } 
-      
-  if (write(fd_b, value, sizeof("1023\n") - 1) < 0) {
-    perror("write");
-    close(fd_b);
-    return 1;
-  } 
-  close(fd_b);
+static int turn_screen_on () {
+  FILE *f = fopen("/sys/class/backlight/panel0-backlight/bl_power", "w");
+  if (f) {
+    fputs("0", f);
+    fclose(f);
+  } else {
+    return -1;
+  }
+
+  unsigned long max_brightness = 0;
+  f = fopen("/sys/class/backlight/panel0-backlight/max_brightness", "r");
+  if (f) {
+    fscanf(f, "%lu", &max_brightness);
+    fclose(f);
+  } else {
+    return -1;
+  }
+
+  f = fopen("/sys/class/backlight/panel0-backlight/brightness", "w");
+  if (f) {
+    fprintf(f, "%lu", max_brightness);
+    fclose(f);
+  } else {
+    return -1;
+  }
+
   return 0;
-}   
+}
 
 static int init_screen () {
   glClearColor(1, 0, 0, 1);
@@ -363,8 +372,8 @@ static int init_screen () {
     return -1;
   }
 
-  if (set_screen_brightness()) {
-    TRACELOG(LOG_WARNING, "COMMA: Failed to set screen brightness");
+  if (turn_screen_on()) {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to turn screen on");
     return -1;
   }
 
