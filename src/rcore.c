@@ -281,9 +281,14 @@ typedef struct CoreData {
         bool eventWaiting;                  // Wait for events before ending frame
         bool usingFbo;                      // Using FBO (RenderTexture) for rendering instead of default framebuffer
 
-        int rot;
-        Shader cc_shader;
-        char *cc_shader_src;
+        int rotation_angle;
+        Rectangle rotation_source;
+        Rectangle rotation_destination;
+        Vector2 rotation_origin;
+        RenderTexture2D rotated_fb;
+
+        Shader color_correction_shader;
+        char *color_correction_shader_src;
 
         Point position;                     // Window position (required on fullscreen toggle)
         Point previousPosition;             // Window previous position (required on borderless windowed toggle)
@@ -375,10 +380,6 @@ typedef struct CoreData {
 RLAPI const char *raylib_version = RAYLIB_VERSION;  // raylib version exported symbol, required for some bindings
 
 CoreData CORE = { 0 };                      // Global CORE state context
-
-static RenderTexture2D gLogicalTarget = {0};
-static int LOGI_W = 0, LOGI_H = 0;
-static int PHYS_W = 0, PHYS_H = 0;
 
 // Flag to note GPU acceleration is available,
 // referenced from other modules to support GPU data loading
@@ -729,14 +730,10 @@ void InitWindow(int width, int height, const char *title)
 
     TRACELOG(LOG_INFO, "SYSTEM: Working Directory: %s", GetWorkingDirectory());
 
-    gLogicalTarget = LoadRenderTexture(CORE.Window.screen.width, CORE.Window.screen.height);
-    LOGI_W = CORE.Window.screen.width;
-    LOGI_H = CORE.Window.screen.height;
-    PHYS_W = CORE.Window.screen.height;
-    PHYS_H = CORE.Window.screen.width;
+    CORE.Window.rotated_fb = LoadRenderTexture(CORE.Window.screen.width, CORE.Window.screen.height);
 
-    CORE.Window.cc_shader = LoadShaderFromMemory(NULL, CORE.Window.cc_shader_src);
-    if (!IsShaderValid(CORE.Window.cc_shader)) {
+    CORE.Window.color_correction_shader = LoadShaderFromMemory(NULL, CORE.Window.color_correction_shader_src);
+    if (!IsShaderValid(CORE.Window.color_correction_shader)) {
       TraceLog(LOG_ERROR, "COMMA: Failed to build color correction shader");
     }
 }
@@ -902,11 +899,10 @@ void BeginDrawing(void)
     rlLoadIdentity();                   // Reset current matrix (modelview)
     rlMultMatrixf(MatrixToFloat(CORE.Window.screenScale)); // Apply screen scaling
 
-    BeginTextureMode(gLogicalTarget);
+    BeginTextureMode(CORE.Window.rotated_fb);
     //rlTranslatef(0.375, 0.375, 0);    // HACK to have 2D pixel-perfect drawing on OpenGL 1.1
                                         // NOTE: Not required with OpenGL 3.3+
 }
-
 
 // End canvas drawing and swap buffers (double buffering)
 void EndDrawing(void)
@@ -914,12 +910,8 @@ void EndDrawing(void)
     EndTextureMode();
     rlDisableColorBlend();
 
-    Rectangle src = {0.0, 0.0, LOGI_W, -LOGI_H};
-    Rectangle dest = {PHYS_W/2, PHYS_H/2, LOGI_W, LOGI_H};
-    Vector2 origin = { LOGI_W/2, LOGI_H/2 };
-
-    BeginShaderMode(CORE.Window.cc_shader);
-      DrawTexturePro(gLogicalTarget.texture, src, dest, origin, CORE.Window.rot, WHITE);
+    BeginShaderMode(CORE.Window.color_correction_shader);
+      DrawTexturePro(CORE.Window.rotated_fb.texture, CORE.Window.rotation_source, CORE.Window.rotation_destination, CORE.Window.rotation_origin, CORE.Window.rotation_angle, WHITE);
     EndShaderMode();
 
     rlDrawRenderBatchActive();

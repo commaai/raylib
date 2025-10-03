@@ -314,7 +314,7 @@ static int init_color_correction(void) {
   TRACELOG(LOG_INFO, "COMMA: Successfully setup color correction");
   free(ccv);
 
-  CORE.Window.cc_shader_src = shader;
+  CORE.Window.color_correction_shader_src = shader;
   return 0;
 
 err:
@@ -516,6 +516,12 @@ static int turn_screen_on () {
 }
 
 static int init_screen () {
+
+  CORE.Window.rotation_angle = platform.canonical_zero ? 270 : 90;
+  CORE.Window.rotation_source = (Rectangle){0.0, 0.0, CORE.Window.screen.width, -((int)CORE.Window.screen.height)};
+  CORE.Window.rotation_destination = (Rectangle){CORE.Window.screen.height/2, CORE.Window.screen.width/2, CORE.Window.screen.width, CORE.Window.screen.height};
+  CORE.Window.rotation_origin = (Vector2){CORE.Window.screen.width/2, CORE.Window.screen.height/2};
+
   glClearColor(1, 0, 0, 1);
   glClear(GL_COLOR_BUFFER_BIT);
   eglSwapBuffers(platform.egl.display, platform.egl.surface);
@@ -561,7 +567,6 @@ static int init_touch(const char *dev_path) {
       return -1;
     } else {
       platform.canonical_zero = origin == 1;
-      CORE.Window.rot = platform.canonical_zero ? 270 : 90;
     }
   } else {
     TRACELOG(LOG_WARNING, "COMMA: Failed to open screen origin");
