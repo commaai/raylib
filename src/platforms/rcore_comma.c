@@ -1055,10 +1055,17 @@ void PollInputEvents(void) {
 //----------------------------------------------------------------------------------
 
 int InitPlatform(void) {
-
   // only support fullscreen
   CORE.Window.fullscreen = true;
   CORE.Window.flags |= FLAG_FULLSCREEN_MODE;
+
+  if (init_drm("/dev/dri/card0")) {
+    TRACELOG(LOG_FATAL, "COMMA: Failed to initialize drm");
+    return -1;
+  }
+
+  CORE.Window.screen.width = platform.drm.mode.vdisplay;
+  CORE.Window.screen.height = platform.drm.mode.hdisplay;
 
   CORE.Window.display.width = CORE.Window.screen.width;
   CORE.Window.display.height = CORE.Window.screen.height;
@@ -1066,11 +1073,6 @@ int InitPlatform(void) {
   // swapped since we render in landscape mode
   CORE.Window.currentFbo.width = CORE.Window.screen.height;
   CORE.Window.currentFbo.height = CORE.Window.screen.width;
-
-  if (init_drm("/dev/dri/card0")) {
-    TRACELOG(LOG_FATAL, "COMMA: Failed to initialize drm");
-    return -1;
-  }
 
   if (init_egl()) {
     TRACELOG(LOG_FATAL, "COMMA: Failed to initialize EGL");
