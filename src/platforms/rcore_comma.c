@@ -51,6 +51,10 @@
 #include <stdint.h>
 #include <string.h>
 #include <fcntl.h>
+#include <unistd.h>
+
+#include <sys/socket.h>
+#include <sys/un.h>
 
 #include <linux/input.h>
 
@@ -158,7 +162,6 @@ const char *eglGetErrorString(EGLint error) {
     }
 }
 #undef CASE_STR
-
 
 // These are actually float16s, so need to be converted before use
 struct __attribute__((__packed__)) color_correction_values {
@@ -323,10 +326,75 @@ err:
   return -1;
 }
 
+static int recv_fd(int sock) {
+  struct msghdr msg = {0};
+  char m = 0;
+  struct iovec io = { .iov_base = &m, .iov_len = 1 };
+
+  char cmsgbuf[CMSG_SPACE(sizeof(int))];
+  memset(cmsgbuf, 0, sizeof(cmsgbuf));
+
+  msg.msg_iov = &io;
+  msg.msg_iovlen = 1;
+  msg.msg_control = cmsgbuf;
+  msg.msg_controllen = sizeof(cmsgbuf);
+
+  if (recvmsg(sock, &msg, 0) < 0) {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to receive from magic");
+    return -1;
+  }
+
+  struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+  if (!cmsg || cmsg->cmsg_level != SOL_SOCKET || cmsg->cmsg_type != SCM_RIGHTS) {
+    errno = EPROTO;
+    return -1;
+  }
+
+  int fd = -1;
+  memcpy(&fd, CMSG_DATA(cmsg), sizeof(int));
+  return fd;
+}
+
 static int init_drm (const char *dev_path) {
-  platform.drm.fd = open(dev_path, O_RDONLY | O_NONBLOCK);
+  const char *s = getenv("DRM_FD");
+  if (s) {
+    char *end = NULL;
+    long v = strtol(s, &end, 10);
+    if (!*s || *end || v < 0 || v > 0x7fffffff) {
+      TRACELOG(LOG_WARNING, "COMMA: Failed to get drm device from env");
+      return -1;
+    }
+    platform.drm.fd = (int)v;
+  } else if (getenv("NO_MASTER")) {
+    platform.drm.fd = open(dev_path, O_RDONLY | O_NONBLOCK);
+  } else {
+    const char *sock_path = "/tmp/drmfd.sock";
+    int s = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (s < 0) {
+      TRACELOG(LOG_WARNING, "COMMA: Failed to open socket to magic");
+      return -1;
+    }
+
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", sock_path);
+
+    if (connect(s, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+      TRACELOG(LOG_WARNING, "COMMA: Failed to connect to magic");
+      return -1;
+    }
+
+    platform.drm.fd = recv_fd(s);
+  }
+
   if (platform.drm.fd < 0) {
     TRACELOG(LOG_WARNING, "COMMA: Failed to open drm device at %s", dev_path);
+    return -1;
+  }
+
+  if (!drmIsMaster(platform.drm.fd)) {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to get master role on %s", dev_path);
     return -1;
   }
 
@@ -535,9 +603,12 @@ static int init_screen () {
     return -1;
   }
 
-  if (drmModeSetCrtc(platform.drm.fd, platform.drm.crtc_id, platform.gbm.current_fb, 0, 0, &platform.drm.connector_id, 1, &platform.drm.mode)) {
-    TRACELOG(LOG_WARNING, "COMMA: Failed to set CRTC");
-    return -1;
+  drmModeCrtc *crtc = drmModeGetCrtc(platform.drm.fd, platform.drm.crtc_id);
+  if (!((crtc->mode_valid != 0) && (crtc->buffer_id != 0))) {
+    if (drmModeSetCrtc(platform.drm.fd, platform.drm.crtc_id, platform.gbm.current_fb, 0, 0, &platform.drm.connector_id, 1, &platform.drm.mode)) {
+      TRACELOG(LOG_WARNING, "COMMA: Failed to set CRTC");
+      return -1;
+    }
   }
 
   if (turn_screen_on()) {
@@ -1006,13 +1077,13 @@ int InitPlatform(void) {
     return -1;
   }
 
-  if (init_screen()) {
-    TRACELOG(LOG_FATAL, "COMMA: Failed to initialize screen");
+  if (init_touch("/dev/input/event2")) {
+    TRACELOG(LOG_FATAL, "COMMA: Failed to initialize touch device");
     return -1;
   }
 
-  if (init_touch("/dev/input/event2")) {
-    TRACELOG(LOG_FATAL, "COMMA: Failed to initialize touch device");
+  if (init_screen()) {
+    TRACELOG(LOG_FATAL, "COMMA: Failed to initialize screen");
     return -1;
   }
 
