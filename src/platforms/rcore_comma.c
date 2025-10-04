@@ -51,18 +51,23 @@
 #include <stdint.h>
 #include <string.h>
 #include <fcntl.h>
+#include <unistd.h>
+
+#include <sys/socket.h>
+#include <sys/un.h>
 
 #include <linux/input.h>
-
-#include <wayland-client.h>
-#include <wayland-server.h>
-#include <wayland-client-protocol.h>
-#include <wayland-egl.h> // must be included before the EGL headers
 
 #include <EGL/egl.h>
 #include <EGL/eglplatform.h>
 
 #include <GLES2/gl2.h>
+
+#include <gbm.h>
+
+#include <xf86drm.h>
+#include <xf86drmMode.h>
+
 
 //----------------------------------------------------------------------------------
 // Types and Structures Definition
@@ -86,36 +91,37 @@ struct touch {
   int fd;
 };
 
-// hold all the low level wayland stuff
-struct wayland_platform {
-  struct wl_compositor *wl_compositor;
-  struct wl_surface *wl_surface;
-  struct wl_egl_window *wl_egl_window;
-  struct wl_region *wl_region;
-  struct wl_shell *wl_shell;
-  struct wl_shell_surface *wl_shell_surface;
-  struct wl_display *wl_display;
-  struct wl_registry *wl_registry;
-};
-
 // hold all the low level egl stuff
 struct egl_platform {
   EGLDisplay display;
   EGLSurface surface;
   EGLContext context;
-  EGLConfig config;
+};
 
-  EGLNativeDisplayType native_display;
-  EGLNativeWindowType native_window;
+// hold all the low level drm stuff
+struct drm_platform {
+  int fd;
 
-  int native_window_width;
-  int native_window_height;
+  uint32_t connector_id;
+  uint32_t crtc_id;
+
+  drmModeModeInfo mode;
+};
+
+// hold all the low level gbm stuff
+struct gbm_platform {
+  struct gbm_surface *surface;
+  struct gbm_bo *current_bo;
+  struct gbm_bo *next_bo;
+  uint32_t current_fb;
+  uint32_t next_fb;
 };
 
 typedef struct {
-    struct wayland_platform wayland;
     struct egl_platform egl;
     struct touch touch;
+    struct drm_platform drm;
+    struct gbm_platform gbm;
     bool canonical_zero;
 } PlatformData;
 
@@ -153,101 +159,259 @@ const char *eglGetErrorString(EGLint error) {
 }
 #undef CASE_STR
 
-void wl_shell_surface_handle_ping (void *data, struct wl_shell_surface *shell_surface, uint32_t serial) {
-  wl_shell_surface_pong(shell_surface, serial);
-}
-
-void wl_shell_surface_handle_configure (void *data, struct wl_shell_surface *shell_surface, uint32_t edges, int32_t width, int32_t height) {
-  wl_egl_window_resize(platform.egl.native_window, width, height, 0, 0);
-}
-
-void wl_shell_surface_handle_popup_done(void *data, struct wl_shell_surface *shell_surface) {
-}
-
-static struct wl_shell_surface_listener wl_shell_surface_listener = {
-  .ping = &wl_shell_surface_handle_ping,
-  .configure = &wl_shell_surface_handle_configure,
-  .popup_done = &wl_shell_surface_handle_popup_done
+// These are actually float16s, so need to be converted before use
+struct __attribute__((__packed__)) color_correction_values {
+  uint16_t gamma;
+  uint16_t ccm[9];
+  uint16_t rgb_color_gains[3];
 };
 
-static void wl_registry_handle_global (void *data, struct wl_registry *registry, uint32_t id, const char *interface, uint32_t version) {
-  if (!strcmp(interface, "wl_compositor")) {
-    // Need version 3 of wl_compositor in order to do the rotation transform with wl_surface_set_buffer_transform
-    platform.wayland.wl_compositor = wl_registry_bind(registry, id, &wl_compositor_interface, 3);
-  } else if (!strcmp(interface, "wl_shell")) {
-    platform.wayland.wl_shell = wl_registry_bind(registry, id, &wl_shell_interface, 1);
-  }
-}
+static const char *color_correction_fragment_shader_template =
+    "#version 100\n"
+    "precision mediump float;\n"
+    "varying vec2 fragTexCoord;\n"
+    "varying vec4 fragColor;\n"
+    "uniform sampler2D texture0;\n"
+    "uniform vec4 colDiffuse;\n"
+    "void main() {\n"
+    "    vec4 c = texture2D(texture0, fragTexCoord) * fragColor * colDiffuse;\n"
+    "    c.rgb = pow(c.rgb, vec3(2.2, 2.2, 2.2));\n"
+    "    c.r *= %f;\n"
+    "    c.g *= %f;\n"
+    "    c.b *= %f;\n"
+    "    vec3 rgb_cc = vec3(0.0, 0.0, 0.0);\n"
+    "    rgb_cc += c.r * vec3(%f, %f, %f);\n"
+    "    rgb_cc += c.g * vec3(%f, %f, %f);\n"
+    "    rgb_cc += c.b * vec3(%f, %f, %f);\n"
+    "    c.rgb = rgb_cc;\n"
+    "    c.rgb = pow(c.rgb, vec3(%f/2.2, %f/2.2, %f/2.2));\n"
+    "    gl_FragColor = c;\n"
+    "}\n";
 
-static void wl_registry_handle_global_remove (void *data, struct wl_registry *registry, uint32_t id) {
-}
-
-const struct wl_registry_listener wl_registry_listener = {
-  .global = wl_registry_handle_global,
-  .global_remove = wl_registry_handle_global_remove
-};
-
-static int init_wayland(int width, int height) {
-  platform.wayland.wl_display = wl_display_connect(NULL);
-  if (platform.wayland.wl_display == NULL) {
-    TRACELOG(LOG_WARNING, "COMMA: Failed to create a Wayland display. Failed with: %s", strerror(errno));
-    return -1;
-  }
-
-  platform.wayland.wl_compositor = NULL;
-  platform.wayland.wl_shell = NULL;
-
-  platform.wayland.wl_registry = wl_display_get_registry(platform.wayland.wl_display);
-  wl_registry_add_listener(platform.wayland.wl_registry, &wl_registry_listener, NULL);
-
-  wl_display_dispatch(platform.wayland.wl_display);
-  wl_display_roundtrip(platform.wayland.wl_display);
-
-  if (platform.wayland.wl_compositor == NULL || platform.wayland.wl_compositor == NULL) {
-    TRACELOG(LOG_WARNING, "COMMA: Failed to bind Wayland globals");
-    return -1;
-  }
-
-  // create a surface with a buffer to do render on it
-  platform.wayland.wl_surface = wl_compositor_create_surface(platform.wayland.wl_compositor);
-
-  FILE *fp = fopen("/sys/devices/platform/vendor/vendor:gpio-som-id/som_id", "r");
-  if (fp != NULL) {
-    int origin;
-    int ret = fscanf(fp, "%d", &origin);
-    fclose(fp);
-    if (ret != 1) {
-      TRACELOG(LOG_WARNING, "COMMA: Failed to test for screen origin");
-      return -1;
+float decode_float16(uint16_t value){
+  uint32_t sign = value >> 15;
+  uint32_t exponent = (value >> 10) & 0x1F;
+  uint32_t fraction = (value & 0x3FF);
+  uint32_t output;
+  if (exponent == 0){
+    if (fraction == 0){
+      // Zero
+      output = (sign << 31);
     } else {
-      platform.canonical_zero = origin == 1;
+      exponent = 127 - 14;
+      while ((fraction & (1 << 10)) == 0) {
+        exponent--;
+        fraction <<= 1;
+      }
+      fraction &= 0x3FF;
+      output = (sign << 31) | (exponent << 23) | (fraction << 13);
     }
+  } else if (exponent == 0x1F) {
+    // Inf or NaN
+    output = (sign << 31) | (0xFF << 23) | (fraction << 13);
   } else {
-    TRACELOG(LOG_WARNING, "COMMA: Failed to open screen origin");
+    // Regular
+    output = (sign << 31) | ((exponent + (127-15)) << 23) | (fraction << 13);
+  }
+
+  return *((float*)&output);
+}
+
+struct color_correction_values * read_correction_values(void) {
+  int ret;
+  FILE *f = NULL;
+  struct color_correction_values *ccv = NULL;
+
+  if (getenv("DISABLE_COLOR_CORRECTION")) {
+    TRACELOG(LOG_WARNING, "COMMA: Color correction disabled by flag");
+    goto err;
+  }
+
+  ccv = malloc(sizeof(struct color_correction_values));
+  if (ccv == NULL) {
+    TRACELOG(LOG_WARNING, "COMMA: CCV allocation failed...");
+    goto err;
+  }
+
+  const char *cal_paths[] = {
+    getenv("COLOR_CORRECTION_PATH"),
+    "/data/misc/display/color_cal/color_cal",
+    "/sys/devices/platform/soc/894000.i2c/i2c-2/2-0017/color_cal",
+    "/persist/comma/color_cal",
+  };
+  for (int i = 0; i < sizeof(cal_paths) / sizeof(const char *); i++) {
+    const char *cal_fn = cal_paths[i];
+    if (cal_fn == NULL) {
+      continue;
+    }
+
+    TRACELOG(LOG_INFO, "COMMA: Color calibration trying %s", cal_fn);
+    f = fopen(cal_fn, "r");
+    if (f == NULL) {
+      TRACELOG(LOG_INFO, "COMMA: - unable to open %s", cal_fn);
+      continue;
+    }
+
+    ret = fread(ccv, sizeof(struct color_correction_values), 1, f);
+    fclose(f);
+    if (ret == 1) {
+      return ccv;
+    } else {
+      TRACELOG(LOG_INFO, "COMMA: - file too short");
+    }
+  }
+
+  TRACELOG(LOG_INFO, "COMMA: No color calibraion files found");
+
+err:
+  if (f != NULL) fclose(f);
+  if (ccv != NULL) free(ccv);
+  return NULL;
+}
+
+static int init_color_correction(void) {
+  int ret;
+  char *shader = NULL;
+  struct color_correction_values *ccv = NULL;
+
+  shader = malloc(1024);
+  if(shader == NULL){
+    TRACELOG(LOG_WARNING, "COMMA: Failed to malloc color correction");
+    goto err;
+  }
+
+  ccv = read_correction_values();
+  if(ccv == NULL){
+    TRACELOG(LOG_INFO, "COMMA: No color correction values found");
+    goto err;
+  }
+
+  ret = sprintf(shader,
+    color_correction_fragment_shader_template,
+    (1.0/decode_float16(ccv->rgb_color_gains[0])),
+    (1.0/decode_float16(ccv->rgb_color_gains[1])),
+    (1.0/decode_float16(ccv->rgb_color_gains[2])),
+    decode_float16(ccv->ccm[0]),
+    decode_float16(ccv->ccm[1]),
+    decode_float16(ccv->ccm[2]),
+    decode_float16(ccv->ccm[3]),
+    decode_float16(ccv->ccm[4]),
+    decode_float16(ccv->ccm[5]),
+    decode_float16(ccv->ccm[6]),
+    decode_float16(ccv->ccm[7]),
+    decode_float16(ccv->ccm[8]),
+    (1.0/decode_float16(ccv->gamma)),
+    (1.0/decode_float16(ccv->gamma)),
+    (1.0/decode_float16(ccv->gamma))
+  );
+
+  if(ret < 0){
+    TRACELOG(LOG_WARNING, "COMMA: Color correction sprintf failed");
+    goto err;
+  }
+
+  TRACELOG(LOG_INFO, "COMMA: Successfully setup color correction");
+  free(ccv);
+
+  CORE.Window.color_correction_shader_src = shader;
+  return 0;
+
+err:
+  if (ccv != NULL) free(ccv);
+  if (shader != NULL) free(shader);
+  return -1;
+}
+
+static int recv_fd(int sock) {
+  struct msghdr msg = {0};
+  char m = 0;
+  struct iovec io = { .iov_base = &m, .iov_len = 1 };
+
+  char cmsgbuf[CMSG_SPACE(sizeof(int))];
+  memset(cmsgbuf, 0, sizeof(cmsgbuf));
+
+  msg.msg_iov = &io;
+  msg.msg_iovlen = 1;
+  msg.msg_control = cmsgbuf;
+  msg.msg_controllen = sizeof(cmsgbuf);
+
+  if (recvmsg(sock, &msg, 0) < 0) {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to receive from magic");
     return -1;
   }
 
-  // apply rotation transform to the buffer of the surface
-  wl_surface_set_buffer_transform(platform.wayland.wl_surface, platform.canonical_zero ? WL_OUTPUT_TRANSFORM_90 : WL_OUTPUT_TRANSFORM_270);
-
-  platform.wayland.wl_shell_surface = wl_shell_get_shell_surface(platform.wayland.wl_shell, platform.wayland.wl_surface);
-  wl_shell_surface_add_listener(platform.wayland.wl_shell_surface, &wl_shell_surface_listener, NULL);
-  wl_shell_surface_set_toplevel(platform.wayland.wl_shell_surface);
-
-  platform.wayland.wl_region = wl_compositor_create_region(platform.wayland.wl_compositor);
-  wl_region_add(platform.wayland.wl_region, 0, 0, width, height);
-  wl_surface_set_opaque_region(platform.wayland.wl_surface, platform.wayland.wl_region);
-
-  // the native window for egl is a our wl_surface
-  platform.egl.native_window = wl_egl_window_create(platform.wayland.wl_surface, width, height);
-  if (platform.egl.native_window == NULL) {
-    TRACELOG(LOG_WARNING, "COMMA: Failed to create a Wayland EGL window");
+  struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+  if (!cmsg || cmsg->cmsg_level != SOL_SOCKET || cmsg->cmsg_type != SCM_RIGHTS) {
+    errno = EPROTO;
     return -1;
   }
-  // the native display for egl is a our wl_display
-  platform.egl.native_display = platform.wayland.wl_display;
-  platform.egl.native_window_width = width;
-  platform.egl.native_window_height = height;
+
+  int fd = -1;
+  memcpy(&fd, CMSG_DATA(cmsg), sizeof(int));
+  return fd;
+}
+
+static int init_drm (const char *dev_path) {
+  const char *s = getenv("DRM_FD");
+  if (s) {
+    char *end = NULL;
+    long v = strtol(s, &end, 10);
+    if (!*s || *end || v < 0 || v > 0x7fffffff) {
+      TRACELOG(LOG_WARNING, "COMMA: Failed to get drm device from env");
+      return -1;
+    }
+    platform.drm.fd = (int)v;
+  } else if (getenv("NO_MASTER")) {
+    platform.drm.fd = open(dev_path, O_RDONLY | O_NONBLOCK);
+  } else {
+    const char *sock_path = "/tmp/drmfd.sock";
+    int s = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (s < 0) {
+      TRACELOG(LOG_WARNING, "COMMA: Failed to open socket to magic");
+      return -1;
+    }
+
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", sock_path);
+
+    if (connect(s, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+      TRACELOG(LOG_WARNING, "COMMA: Failed to connect to magic");
+      return -1;
+    }
+
+    platform.drm.fd = recv_fd(s);
+  }
+
+  if (platform.drm.fd < 0) {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to open drm device at %s", dev_path);
+    return -1;
+  }
+
+  if (!drmIsMaster(platform.drm.fd)) {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to get master role on %s", dev_path);
+    return -1;
+  }
+
+  drmModeConnector *connector = NULL;
+  drmModeRes *res = drmModeGetResources(platform.drm.fd);
+  for (int i = 0; i < res->count_connectors; i++) {
+    connector = drmModeGetConnector(platform.drm.fd, res->connectors[i]);
+    if (connector->connection == DRM_MODE_CONNECTED && connector->count_modes > 0) {
+      break;
+    }
+    drmModeFreeConnector(connector);
+    connector = NULL;
+  }
+  if (!connector) {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to get a drm connector");
+    return -1;
+  }
+
+  platform.drm.connector_id = connector->connector_id;
+  platform.drm.mode = connector->modes[0];
+  platform.drm.crtc_id = res->crtcs[0];
 
   return 0;
 }
@@ -255,7 +419,7 @@ static int init_wayland(int width, int height) {
 static int init_egl () {
    EGLint major;
    EGLint minor;
-   EGLConfig config;
+   EGLConfig config = NULL;
    EGLint num_config;
    EGLint frame_buffer_config [] = {
      EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
@@ -269,8 +433,13 @@ static int init_egl () {
    // ask for an OpenGL ES 2 rendering context
    EGLint context_config [] = { EGL_CONTEXT_MAJOR_VERSION, 2, EGL_NONE, EGL_NONE };
 
-   // get an egl display with our native display (in our case, a wl_display)
-   platform.egl.display = eglGetDisplay(platform.egl.native_display);
+   struct gbm_device *gbm = gbm_create_device(platform.drm.fd);
+   if (!gbm) {
+     TRACELOG(LOG_WARNING, "COMMA: Failed to create gbm device");
+     return -1;
+   }
+
+   platform.egl.display = eglGetDisplay(gbm);
    if (platform.egl.display == EGL_NO_DISPLAY) {
      TRACELOG(LOG_WARNING, "COMMA: Failed to get an EGL display");
      return -1;
@@ -282,13 +451,46 @@ static int init_egl () {
    }
    TRACELOG(LOG_INFO, "COMMA: Using EGL version %i.%i", major, minor);
 
-   if (!eglChooseConfig(platform.egl.display, frame_buffer_config, &config, 1, &num_config)) {
-     TRACELOG(LOG_WARNING, "COMMA: Failed to get a valid EGL display config. Error code: %s", eglGetErrorString(eglGetError()));
+   if (!eglGetConfigs(platform.egl.display, NULL, 0, &num_config) || num_config < 1) {
+     TRACELOG(LOG_WARNING, "COMMA: Failed to list EGL display configs. Error code: %s", eglGetErrorString(eglGetError()));
      return -1;
    }
-   TRACELOG(LOG_INFO, "COMMA: Found %i valid EGL display configs", num_config);
 
-   platform.egl.surface = eglCreateWindowSurface(platform.egl.display, config, platform.egl.native_window, NULL);
+   EGLConfig *configs = malloc(num_config * sizeof(EGLConfig));
+   if (!eglChooseConfig(platform.egl.display, frame_buffer_config, configs, num_config, &num_config)) {
+     TRACELOG(LOG_WARNING, "%s", eglGetErrorString(eglGetError()));
+     return -1;
+   }
+   if (num_config == 0) {
+     TRACELOG(LOG_WARNING, "%s", eglGetErrorString(eglGetError()));
+     return -1;
+   }
+
+   for (int i = 0; i < num_config; ++i) {
+     EGLint gbm_format;
+     if (!eglGetConfigAttrib(platform.egl.display, configs[i], EGL_NATIVE_VISUAL_ID, &gbm_format)) {
+       continue;
+     }
+
+     if (gbm_format == GBM_FORMAT_ABGR8888) {
+       config = configs[i];
+       free(configs);
+       break;
+     }
+   }
+
+   if (config == NULL) {
+     TRACELOG(LOG_WARNING, "COMMA: Failed to find correct config");
+     return -1;
+   }
+
+   platform.gbm.surface = gbm_surface_create(gbm, platform.drm.mode.hdisplay, platform.drm.mode.vdisplay, GBM_FORMAT_ABGR8888, GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+   if (!platform.gbm.surface) {
+     TRACELOG(LOG_WARNING, "COMMA: Failed to create gbm surface");
+     return -1;
+   }
+
+   platform.egl.surface = eglCreateWindowSurface(platform.egl.display, config, (EGLNativeWindowType)platform.gbm.surface, NULL);
    if (platform.egl.surface == EGL_NO_SURFACE) {
      TRACELOG(LOG_WARNING, "COMMA: Failed to create an EGL surface. Error code: %s", eglGetErrorString(eglGetError()));
      return -1;
@@ -311,16 +513,128 @@ static int init_egl () {
      return -1;
    }
 
-   // enable depth testing. Not necessary if only doing 2D
-   glEnable(GL_DEPTH_TEST);
-
    return 0;
+}
+
+static void bo_user_data_destroy(struct gbm_bo *bo, void *user_data) {
+  uint32_t fb_id = (uint32_t)(uintptr_t)user_data;
+  if (fb_id) {
+    drmModeRmFB(platform.drm.fd, fb_id);
+  }
+}
+
+static int get_or_create_fb_for_bo(struct gbm_bo *bo, uint32_t *out_fb) {
+    void *user_data = gbm_bo_get_user_data(bo);
+    if (user_data) {
+      *out_fb = (uint32_t)(uintptr_t)user_data;
+      return 0;
+    }
+
+    uint32_t w = gbm_bo_get_width(bo);
+    uint32_t h = gbm_bo_get_height(bo);
+    uint32_t stride = gbm_bo_get_stride(bo);
+    uint32_t handle = gbm_bo_get_handle(bo).u32;
+
+    uint32_t handles[4] = { handle };
+    uint32_t pitches[4] = { stride };
+    uint32_t offsets[4] = { 0 };
+    uint32_t fb_id = 0;
+
+    if (drmModeAddFB2(platform.drm.fd, w, h, GBM_FORMAT_ABGR8888, handles, pitches, offsets, &fb_id, 0) != 0) {
+      return -1;
+    }
+
+    gbm_bo_set_user_data(bo, (void*)(uintptr_t)fb_id, bo_user_data_destroy);
+
+    *out_fb = fb_id;
+    return 0;
+}
+
+static int turn_screen_on () {
+  FILE *f = fopen("/sys/class/backlight/panel0-backlight/bl_power", "w");
+  if (f) {
+    fputs("0", f);
+    fclose(f);
+  } else {
+    return -1;
+  }
+
+  unsigned long max_brightness = 0;
+  f = fopen("/sys/class/backlight/panel0-backlight/max_brightness", "r");
+  if (f) {
+    fscanf(f, "%lu", &max_brightness);
+    fclose(f);
+  } else {
+    return -1;
+  }
+
+  f = fopen("/sys/class/backlight/panel0-backlight/brightness", "w");
+  if (f) {
+    fprintf(f, "%lu", max_brightness);
+    fclose(f);
+  } else {
+    return -1;
+  }
+
+  return 0;
+}
+
+static int init_screen () {
+
+  CORE.Window.rotation_angle = platform.canonical_zero ? 270 : 90;
+  CORE.Window.rotation_source = (Rectangle){0.0, 0.0, CORE.Window.screen.width, -((int)CORE.Window.screen.height)};
+  CORE.Window.rotation_destination = (Rectangle){CORE.Window.screen.height/2, CORE.Window.screen.width/2, CORE.Window.screen.width, CORE.Window.screen.height};
+  CORE.Window.rotation_origin = (Vector2){CORE.Window.screen.width/2, CORE.Window.screen.height/2};
+
+  eglSwapBuffers(platform.egl.display, platform.egl.surface);
+
+  platform.gbm.current_bo = gbm_surface_lock_front_buffer(platform.gbm.surface);
+  if (!platform.gbm.current_bo) {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to get initial front buffer object");
+    return -1;
+  }
+
+  if (get_or_create_fb_for_bo(platform.gbm.current_bo, &platform.gbm.current_fb)) {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to get initial frame buffer");
+    return -1;
+  }
+
+  drmModeCrtc *crtc = drmModeGetCrtc(platform.drm.fd, platform.drm.crtc_id);
+  if (!((crtc->mode_valid != 0) && (crtc->buffer_id != 0))) {
+    if (drmModeSetCrtc(platform.drm.fd, platform.drm.crtc_id, platform.gbm.current_fb, 0, 0, &platform.drm.connector_id, 1, &platform.drm.mode)) {
+      TRACELOG(LOG_WARNING, "COMMA: Failed to set CRTC");
+      return -1;
+    }
+  }
+
+  if (turn_screen_on()) {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to turn screen on");
+    return -1;
+  }
+
+  return 0;
 }
 
 static int init_touch(const char *dev_path) {
   platform.touch.fd = open(dev_path, O_RDONLY|O_NONBLOCK);
   if (platform.touch.fd < 0) {
     TRACELOG(LOG_WARNING, "COMMA: Failed to open touch device at %s", dev_path);
+    return -1;
+  }
+
+  FILE *fp = fopen("/sys/devices/platform/vendor/vendor:gpio-som-id/som_id", "r");
+  if (fp != NULL) {
+    int origin;
+    int ret = fscanf(fp, "%d", &origin);
+    fclose(fp);
+    if (ret != 1) {
+      TRACELOG(LOG_WARNING, "COMMA: Failed to test for screen origin");
+      return -1;
+    } else {
+      platform.canonical_zero = origin == 1;
+    }
+  } else {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to open screen origin");
     return -1;
   }
 
@@ -574,6 +888,39 @@ void DisableCursor(void) {
 // Swap back buffer with front buffer (screen drawing)
 void SwapScreenBuffer(void) {
   eglSwapBuffers(platform.egl.display, platform.egl.surface);
+
+  platform.gbm.next_bo = gbm_surface_lock_front_buffer(platform.gbm.surface);
+  if (!platform.gbm.next_bo) {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to get rendered buffer object");
+    return;
+  }
+
+  if (get_or_create_fb_for_bo(platform.gbm.next_bo, &platform.gbm.next_fb)) {
+    gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
+    platform.gbm.next_bo = NULL;
+    TRACELOG(LOG_WARNING, "COMMA: Failed to get frame buffer for rendered buffer object");
+    return;
+  }
+
+  if (drmModePageFlip(platform.drm.fd, platform.drm.crtc_id, platform.gbm.next_fb, 0, NULL) != 0) {
+    TRACELOG(LOG_WARNING, "COMMA: ");
+    drmModeRmFB(platform.drm.fd, platform.gbm.next_fb);
+    gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
+    platform.gbm.next_bo = NULL;
+    platform.gbm.next_fb = 0;
+    return;
+  }
+
+  drmVBlank v = {0};
+  v.request.type = DRM_VBLANK_RELATIVE;
+  v.request.sequence = 1;
+  drmWaitVBlank(platform.drm.fd, &v);
+
+  if (platform.gbm.current_bo) {
+    gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.current_bo);
+  }
+
+  platform.gbm.current_bo = platform.gbm.next_bo;
 }
 
 //----------------------------------------------------------------------------------
@@ -704,23 +1051,24 @@ void PollInputEvents(void) {
 //----------------------------------------------------------------------------------
 
 int InitPlatform(void) {
-
   // only support fullscreen
   CORE.Window.fullscreen = true;
   CORE.Window.flags |= FLAG_FULLSCREEN_MODE;
 
-  // in our case, all those width/height are the same
-  CORE.Window.currentFbo.width = CORE.Window.screen.width;
-  CORE.Window.currentFbo.height = CORE.Window.screen.height;
-  CORE.Window.display.width = CORE.Window.screen.width;
-  CORE.Window.display.height = CORE.Window.screen.height;
-  CORE.Window.render.width = CORE.Window.screen.width;
-  CORE.Window.render.height = CORE.Window.screen.height;
-
-  if (init_wayland(CORE.Window.currentFbo.width, CORE.Window.currentFbo.height)) {
-    TRACELOG(LOG_FATAL, "COMMA: Failed to initialize Wayland");
+  if (init_drm("/dev/dri/card0")) {
+    TRACELOG(LOG_FATAL, "COMMA: Failed to initialize drm");
     return -1;
   }
+
+  CORE.Window.screen.width = platform.drm.mode.vdisplay;
+  CORE.Window.screen.height = platform.drm.mode.hdisplay;
+
+  CORE.Window.display.width = CORE.Window.screen.width;
+  CORE.Window.display.height = CORE.Window.screen.height;
+
+  // swapped since we render in landscape mode
+  CORE.Window.currentFbo.width = CORE.Window.screen.height;
+  CORE.Window.currentFbo.height = CORE.Window.screen.width;
 
   if (init_egl()) {
     TRACELOG(LOG_FATAL, "COMMA: Failed to initialize EGL");
@@ -732,7 +1080,16 @@ int InitPlatform(void) {
     return -1;
   }
 
-  SetupFramebuffer(CORE.Window.display.width, CORE.Window.display.height);
+  if (init_screen()) {
+    TRACELOG(LOG_FATAL, "COMMA: Failed to initialize screen");
+    return -1;
+  }
+
+  if (init_color_correction()) {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to initialize color correction");
+  }
+
+  SetupFramebuffer(CORE.Window.currentFbo.width, CORE.Window.currentFbo.height);
   rlLoadExtensions(eglGetProcAddress);
   InitTimer();
   CORE.Storage.basePath = GetWorkingDirectory();
