@@ -96,10 +96,6 @@ struct egl_platform {
   EGLDisplay display;
   EGLSurface surface;
   EGLContext context;
-  EGLConfig config;
-
-  int native_window_width;
-  int native_window_height;
 };
 
 // hold all the low level drm stuff
@@ -252,7 +248,7 @@ struct color_correction_values * read_correction_values(void) {
     TRACELOG(LOG_INFO, "COMMA: Color calibration trying %s", cal_fn);
     f = fopen(cal_fn, "r");
     if (f == NULL) {
-      TRACELOG(LOG_WARNING, "COMMA: - unable to open %s", cal_fn);
+      TRACELOG(LOG_INFO, "COMMA: - unable to open %s", cal_fn);
       continue;
     }
 
@@ -261,11 +257,11 @@ struct color_correction_values * read_correction_values(void) {
     if (ret == 1) {
       return ccv;
     } else {
-      TRACELOG(LOG_WARNING, "COMMA: - file too short");
+      TRACELOG(LOG_INFO, "COMMA: - file too short");
     }
   }
 
-  TRACELOG(LOG_WARNING, "COMMA: No color calibraion files found");
+  TRACELOG(LOG_INFO, "COMMA: No color calibraion files found");
 
 err:
   if (f != NULL) fclose(f);
@@ -286,7 +282,7 @@ static int init_color_correction(void) {
 
   ccv = read_correction_values();
   if(ccv == NULL){
-    TRACELOG(LOG_WARNING, "COMMA: No color correction values found");
+    TRACELOG(LOG_INFO, "COMMA: No color correction values found");
     goto err;
   }
 
