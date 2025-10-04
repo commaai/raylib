@@ -489,6 +489,9 @@ endif
 ifeq ($(TARGET_PLATFORM),PLATFORM_DESKTOP_SDL)
     INCLUDE_PATHS += -I$(SDL_INCLUDE_PATH)
 endif
+ifeq ($(TARGET_PLATFORM),PLATFORM_COMMA)
+    INCLUDE_PATHS += -I/usr/include/libdrm
+endif
 ifeq ($(TARGET_PLATFORM),PLATFORM_WEB)
     INCLUDE_PATHS += -Iexternal/glfw/include
 endif
@@ -636,7 +639,7 @@ ifeq ($(TARGET_PLATFORM),PLATFORM_DRM)
     endif
 endif
 ifeq ($(TARGET_PLATFORM),PLATFORM_COMMA)
-    LDLIBS = -lGLESv2 -lEGL -lGL -lpthread -lrt -lm -ldl
+    LDLIBS = -lGLESv2 -lEGL -lGL -lpthread -lrt -lm -ldl -lgbm -ldrm
     ifeq ($(RAYLIB_MODULE_AUDIO),TRUE)
         LDLIBS += -latomic
     endif
