@@ -1099,6 +1099,8 @@ int InitPlatform(void) {
   InitTimer();
   CORE.Storage.basePath = GetWorkingDirectory();
 
+  CORE.Window.ready = true;
+
   TRACELOG(LOG_INFO, "COMMA: Initialized successfully");
   return 0;
 }
