@@ -110,6 +110,7 @@ struct drm_platform {
 
 // hold all the low level gbm stuff
 struct gbm_platform {
+  struct gbm_device *device;
   struct gbm_surface *surface;
   struct gbm_bo *current_bo;
   struct gbm_bo *next_bo;
@@ -413,6 +414,9 @@ static int init_drm (const char *dev_path) {
   platform.drm.mode = connector->modes[0];
   platform.drm.crtc_id = res->crtcs[0];
 
+  drmModeFreeConnector(connector);
+  drmModeFreeResources(res);
+
   return 0;
 }
 
@@ -433,13 +437,13 @@ static int init_egl () {
    // ask for an OpenGL ES 2 rendering context
    EGLint context_config [] = { EGL_CONTEXT_MAJOR_VERSION, 2, EGL_NONE, EGL_NONE };
 
-   struct gbm_device *gbm = gbm_create_device(platform.drm.fd);
-   if (!gbm) {
+   platform.gbm.device = gbm_create_device(platform.drm.fd);
+   if (!platform.gbm.device) {
      TRACELOG(LOG_WARNING, "COMMA: Failed to create gbm device");
      return -1;
    }
 
-   platform.egl.display = eglGetDisplay(gbm);
+   platform.egl.display = eglGetDisplay(platform.gbm.device);
    if (platform.egl.display == EGL_NO_DISPLAY) {
      TRACELOG(LOG_WARNING, "COMMA: Failed to get an EGL display");
      return -1;
@@ -484,7 +488,7 @@ static int init_egl () {
      return -1;
    }
 
-   platform.gbm.surface = gbm_surface_create(gbm, platform.drm.mode.hdisplay, platform.drm.mode.vdisplay, GBM_FORMAT_ABGR8888, GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+   platform.gbm.surface = gbm_surface_create(platform.gbm.device, platform.drm.mode.hdisplay, platform.drm.mode.vdisplay, GBM_FORMAT_ABGR8888, GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
    if (!platform.gbm.surface) {
      TRACELOG(LOG_WARNING, "COMMA: Failed to create gbm surface");
      return -1;
@@ -580,7 +584,6 @@ static int turn_screen_on () {
 }
 
 static int init_screen () {
-
   CORE.Window.rotation_angle = platform.canonical_zero ? 270 : 90;
   CORE.Window.rotation_source = (Rectangle){0.0, 0.0, CORE.Window.screen.width, -((int)CORE.Window.screen.height)};
   CORE.Window.rotation_destination = (Rectangle){CORE.Window.screen.height/2, CORE.Window.screen.width/2, CORE.Window.screen.width, CORE.Window.screen.height};
@@ -606,6 +609,8 @@ static int init_screen () {
       return -1;
     }
   }
+
+  drmModeFreeCrtc(crtc);
 
   if (turn_screen_on()) {
     TRACELOG(LOG_WARNING, "COMMA: Failed to turn screen on");
@@ -1094,9 +1099,53 @@ int InitPlatform(void) {
   InitTimer();
   CORE.Storage.basePath = GetWorkingDirectory();
 
+  CORE.Window.ready = true;
+
   TRACELOG(LOG_INFO, "COMMA: Initialized successfully");
   return 0;
 }
 
 void ClosePlatform(void) {
+  if (platform.egl.display != EGL_NO_DISPLAY) {
+    eglMakeCurrent(platform.egl.display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+
+    if (platform.egl.surface != EGL_NO_SURFACE) {
+      eglDestroySurface(platform.egl.display, platform.egl.surface);
+      platform.egl.surface = EGL_NO_SURFACE;
+    }
+    if (platform.egl.context != EGL_NO_CONTEXT) {
+      eglDestroyContext(platform.egl.display, platform.egl.context);
+      platform.egl.context = EGL_NO_CONTEXT;
+    }
+    eglTerminate(platform.egl.display);
+    platform.egl.display = EGL_NO_DISPLAY;
+  }
+
+  if (platform.gbm.current_fb) {
+    drmModeRmFB(platform.drm.fd, platform.gbm.current_fb);
+  }
+
+  if (platform.gbm.next_fb) {
+    drmModeRmFB(platform.drm.fd, platform.gbm.next_fb);
+  }
+
+  if (platform.gbm.surface) {
+    if (platform.gbm.current_bo) {
+      gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.current_bo);
+    }
+
+    if (platform.gbm.next_bo) {
+      gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
+    }
+
+    gbm_surface_destroy(platform.gbm.surface);
+    platform.gbm.surface = NULL;
+  }
+
+  if (platform.gbm.device) {
+    gbm_device_destroy(platform.gbm.device);
+    platform.gbm.device = NULL;
+  }
+
+  close(platform.touch.fd);
 }
