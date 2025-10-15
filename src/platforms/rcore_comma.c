@@ -313,7 +313,6 @@ static int init_color_correction(void) {
 
   TRACELOG(LOG_INFO, "COMMA: Successfully setup color correction");
   free(ccv);
-  free(shader);
 
   CORE.Window.color_correction_shader_src = shader;
   return 0;
@@ -384,7 +383,6 @@ static int init_drm (const char *dev_path) {
     }
 
     platform.drm.fd = recv_fd(s);
-    close(s);
   }
 
   if (platform.drm.fd < 0) {
@@ -1109,19 +1107,47 @@ int InitPlatform(void) {
 
 
 void ClosePlatform(void) {
-  drmModeRmFB(platform.drm.fd, platform.gbm.current_fb);
-  drmModeRmFB(platform.drm.fd, platform.gbm.next_fb);
-  gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.current_bo);
-  gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
-  gbm_surface_destroy(platform.gbm.surface);
-  gbm_device_destroy(platform.gbm.device);
+  if (platform.egl.display != EGL_NO_DISPLAY) {
+    eglMakeCurrent(platform.egl.display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 
-  eglMakeCurrent(platform.egl.display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-  eglDestroySurface(platform.egl.display, platform.egl.surface);
-  eglDestroyContext(platform.egl.display, platform.egl.context);
-  eglTerminate(platform.egl.display);
+    if (platform.egl.surface != EGL_NO_SURFACE) {
+      eglDestroySurface(platform.egl.display, platform.egl.surface);
+      platform.egl.surface = EGL_NO_SURFACE;
+    }
+    if (platform.egl.context != EGL_NO_CONTEXT) {
+      eglDestroyContext(platform.egl.display, platform.egl.context);
+      platform.egl.context = EGL_NO_CONTEXT;
+    }
+    eglTerminate(platform.egl.display);
+    platform.egl.display = EGL_NO_DISPLAY;
+  }
 
-  close(platform.drm.fd);
+  if (platform.gbm.current_fb) {
+    drmModeRmFB(platform.drm.fd, platform.gbm.current_fb);
+  }
+
+  if (platform.gbm.next_fb) {
+    drmModeRmFB(platform.drm.fd, platform.gbm.next_fb);
+  }
+
+  if (platform.gbm.surface) {
+    if (platform.gbm.current_bo) {
+      gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.current_bo);
+    }
+
+    if (platform.gbm.next_bo) {
+      gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
+    }
+
+    gbm_surface_destroy(platform.gbm.surface);
+    platform.gbm.surface = NULL;
+  }
+
+  if (platform.gbm.device) {
+    gbm_device_destroy(platform.gbm.device);
+    platform.gbm.device = NULL;
+  }
+
   close(platform.touch.fd);
   printf("CLOSE_PLATFORM: DONE\n");
 }
