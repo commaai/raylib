@@ -414,7 +414,6 @@ static int init_drm (const char *dev_path) {
   platform.drm.mode = connector->modes[0];
   platform.drm.crtc_id = res->crtcs[0];
 
-
   drmModeFreeConnector(connector);
   drmModeFreeResources(res);
 
@@ -1056,7 +1055,6 @@ void PollInputEvents(void) {
 // Module Internal Functions Definition
 //----------------------------------------------------------------------------------
 
-
 int InitPlatform(void) {
   // only support fullscreen
   CORE.Window.fullscreen = true;
@@ -1104,7 +1102,6 @@ int InitPlatform(void) {
   TRACELOG(LOG_INFO, "COMMA: Initialized successfully");
   return 0;
 }
-
 
 void ClosePlatform(void) {
   if (platform.egl.display != EGL_NO_DISPLAY) {
