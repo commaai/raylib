@@ -1106,6 +1106,8 @@ int InitPlatform(void) {
 }
 
 void ClosePlatform(void) {
+  CORE.Window.ready = false;
+
   if (platform.egl.display != EGL_NO_DISPLAY) {
     eglMakeCurrent(platform.egl.display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 
