@@ -1148,5 +1148,4 @@ void ClosePlatform(void) {
   }
 
   close(platform.touch.fd);
-  printf("CLOSE_PLATFORM: DONE\n");
 }
