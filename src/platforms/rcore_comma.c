@@ -1123,25 +1123,8 @@ void ClosePlatform(void) {
     platform.egl.display = EGL_NO_DISPLAY;
   }
 
-  if (platform.gbm.current_fb) {
-    drmModeRmFB(platform.drm.fd, platform.gbm.current_fb);
-  }
-
-  if (platform.gbm.next_fb) {
-    drmModeRmFB(platform.drm.fd, platform.gbm.next_fb);
-  }
-
-  if (platform.gbm.surface) {
-    if (platform.gbm.current_bo) {
-      gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.current_bo);
-    }
-
-    if (platform.gbm.next_bo) {
-      gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
-    }
-
-    gbm_surface_destroy(platform.gbm.surface);
-    platform.gbm.surface = NULL;
+  if (platform.gbm.surface && platform.gbm.next_bo) {
+    gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
   }
 
   if (platform.gbm.device) {
