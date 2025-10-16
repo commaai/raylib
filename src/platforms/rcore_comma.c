@@ -1105,8 +1105,6 @@ int InitPlatform(void) {
   return 0;
 }
 
-
-
 void ClosePlatform(void) {
   CORE.Window.ready = false;
 
