@@ -908,7 +908,7 @@ void SwapScreenBuffer(void) {
   }
 
   if (drmModePageFlip(platform.drm.fd, platform.drm.crtc_id, platform.gbm.next_fb, 0, NULL) != 0) {
-    TRACELOG(LOG_WARNING, "COMMA: ");
+    TRACELOG(LOG_WARNING, "COMMA: Failed to page flip");
     drmModeRmFB(platform.drm.fd, platform.gbm.next_fb);
     gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
     platform.gbm.next_bo = NULL;
