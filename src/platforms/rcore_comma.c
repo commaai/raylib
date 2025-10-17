@@ -640,7 +640,7 @@ static int init_touch(const char *dev_path) {
     }
   } else {
     TRACELOG(LOG_WARNING, "COMMA: Failed to open screen origin");
-    return -1;
+    platform.canonical_zero = false;
   }
 
   for (int i = 0; i < MAX_TOUCH_POINTS; ++i) {
