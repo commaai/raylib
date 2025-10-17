@@ -554,29 +554,26 @@ static int get_or_create_fb_for_bo(struct gbm_bo *bo, uint32_t *out_fb) {
     return 0;
 }
 
-static FILE* open_with_retry(const char *path, const char *mode, int timeout_ms) {
+static FILE* open_with_retry(const char *path, const char *mode) {
   const int sleep_ms = 50;
   int waited = 0;
   FILE *f = NULL;
 
-  while (waited <= timeout_ms) {
+  while (waited <= 500) {
     f = fopen(path, mode);
     if (f) {
-      FILE *ff = fopen("/data/init_screen_logs", "a");         // append text
-      if (!ff) return NULL;
-      if (fprintf(ff, "%s : %dms\n", path, waited) < 0) { fclose(ff); return NULL; }
-      fclose(ff);
       return f;
     }
     struct timespec ts = { .tv_sec = 0, .tv_nsec = sleep_ms * 1000000L };
     nanosleep(&ts, NULL);
     waited += sleep_ms;
   }
+
   return NULL;
 }
 
 static int turn_screen_on () {
-  FILE *f = open_with_retry("/sys/class/backlight/panel0-backlight/bl_power", "w", 1000);
+  FILE *f = open_with_retry("/sys/class/backlight/panel0-backlight/bl_power", "w");
   if (f) {
     fputs("0", f);
     fclose(f);
@@ -586,7 +583,7 @@ static int turn_screen_on () {
   }
 
   unsigned long max_brightness = 0;
-  f = open_with_retry("/sys/class/backlight/panel0-backlight/max_brightness", "r", 1000);
+  f = open_with_retry("/sys/class/backlight/panel0-backlight/max_brightness", "r");
   if (f) {
     fscanf(f, "%lu", &max_brightness);
     fclose(f);
@@ -595,7 +592,7 @@ static int turn_screen_on () {
     return -1;
   }
 
-  f = open_with_retry("/sys/class/backlight/panel0-backlight/brightness", "w", 1000);
+  f = open_with_retry("/sys/class/backlight/panel0-backlight/brightness", "w");
   if (f) {
     fprintf(f, "%lu", max_brightness);
     fclose(f);
