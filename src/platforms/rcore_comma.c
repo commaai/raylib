@@ -661,7 +661,7 @@ static int init_touch(const char *dev_path) {
     }
   } else {
     TRACELOG(LOG_WARNING, "COMMA: Failed to open screen origin");
-    return -1;
+    platform.canonical_zero = false;
   }
 
   for (int i = 0; i < MAX_TOUCH_POINTS; ++i) {
@@ -929,7 +929,7 @@ void SwapScreenBuffer(void) {
   }
 
   if (drmModePageFlip(platform.drm.fd, platform.drm.crtc_id, platform.gbm.next_fb, 0, NULL) != 0) {
-    TRACELOG(LOG_WARNING, "COMMA: ");
+    TRACELOG(LOG_WARNING, "COMMA: Failed to page flip");
     drmModeRmFB(platform.drm.fd, platform.gbm.next_fb);
     gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
     platform.gbm.next_bo = NULL;
