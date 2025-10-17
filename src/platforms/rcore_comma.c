@@ -554,29 +554,53 @@ static int get_or_create_fb_for_bo(struct gbm_bo *bo, uint32_t *out_fb) {
     return 0;
 }
 
+static FILE* open_with_retry(const char *path, const char *mode, int timeout_ms) {
+  const int sleep_ms = 50;
+  int waited = 0;
+  FILE *f = NULL;
+
+  while (waited <= timeout_ms) {
+    f = fopen(path, mode);
+    if (f) {
+      FILE *ff = fopen("/data/init_screen_logs", "a");         // append text
+      if (!ff) return NULL;
+      if (fprintf(ff, "%s : %dms\n", path, waited) < 0) { fclose(ff); return NULL; }
+      fclose(ff);
+      return f;
+    }
+    struct timespec ts = { .tv_sec = 0, .tv_nsec = sleep_ms * 1000000L };
+    nanosleep(&ts, NULL);
+    waited += sleep_ms;
+  }
+  return NULL;
+}
+
 static int turn_screen_on () {
-  FILE *f = fopen("/sys/class/backlight/panel0-backlight/bl_power", "w");
+  FILE *f = open_with_retry("/sys/class/backlight/panel0-backlight/bl_power", "w", 1000);
   if (f) {
     fputs("0", f);
     fclose(f);
   } else {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to open bl_power");
     return -1;
   }
 
   unsigned long max_brightness = 0;
-  f = fopen("/sys/class/backlight/panel0-backlight/max_brightness", "r");
+  f = open_with_retry("/sys/class/backlight/panel0-backlight/max_brightness", "r", 1000);
   if (f) {
     fscanf(f, "%lu", &max_brightness);
     fclose(f);
   } else {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to open max_brightness");
     return -1;
   }
 
-  f = fopen("/sys/class/backlight/panel0-backlight/brightness", "w");
+  f = open_with_retry("/sys/class/backlight/panel0-backlight/brightness", "w", 1000);
   if (f) {
     fprintf(f, "%lu", max_brightness);
     fclose(f);
   } else {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to open brightness");
     return -1;
   }
 
