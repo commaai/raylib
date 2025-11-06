@@ -124,6 +124,7 @@ typedef struct {
     struct drm_platform drm;
     struct gbm_platform gbm;
     bool canonical_zero;
+    bool debug_mode;
 } PlatformData;
 
 //----------------------------------------------------------------------------------
@@ -913,6 +914,8 @@ void DisableCursor(void) {
 
 // Swap back buffer with front buffer (screen drawing)
 void SwapScreenBuffer(void) {
+  static uint32_t vblank_id = 0;
+
   eglSwapBuffers(platform.egl.display, platform.egl.surface);
 
   platform.gbm.next_bo = gbm_surface_lock_front_buffer(platform.gbm.surface);
@@ -941,6 +944,12 @@ void SwapScreenBuffer(void) {
   v.request.type = DRM_VBLANK_RELATIVE;
   v.request.sequence = 1;
   drmWaitVBlank(platform.drm.fd, &v);
+  if (platform.debug_mode) {
+    if ((v.reply.sequence - vblank_id) > 1) {
+      TRACELOG(LOG_WARNING, "%i FRAME(s) DROPPED!", (v.reply.sequence - vblank_id) - 1);
+    }
+  }
+  vblank_id = v.reply.sequence;
 
   if (platform.gbm.current_bo) {
     gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.current_bo);
@@ -1114,6 +1123,9 @@ int InitPlatform(void) {
   if (init_color_correction()) {
     TRACELOG(LOG_WARNING, "COMMA: Failed to initialize color correction");
   }
+
+  const char *d = getenv("MAGIC_DEBUG");
+  platform.debug_mode = (d && d[0] == '1');
 
   SetupFramebuffer(CORE.Window.currentFbo.width, CORE.Window.currentFbo.height);
   rlLoadExtensions(eglGetProcAddress);
