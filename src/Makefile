@@ -368,6 +368,9 @@ ifeq ($(RAYLIB_BUILD_MODE),RELEASE)
     ifeq ($(TARGET_PLATFORM),PLATFORM_ANDROID)
         CFLAGS += -O2
     endif
+    ifeq ($(TARGET_PLATFORM),PLATFORM_COMMA)
+        CFLAGS += -O2
+    endif
 endif
 
 # Additional flags for compiler (if desired)
