@@ -276,6 +276,10 @@ static int init_color_correction(void) {
   char *shader = NULL;
   struct color_correction_values *ccv = NULL;
 
+  if (!platform.canonical_zero) {
+    return 0;
+  }
+
   shader = malloc(1024);
   if(shader == NULL){
     TRACELOG(LOG_WARNING, "COMMA: Failed to malloc color correction");
