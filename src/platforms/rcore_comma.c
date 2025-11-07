@@ -276,7 +276,7 @@ static int init_color_correction(void) {
   char *shader = NULL;
   struct color_correction_values *ccv = NULL;
 
-  if (!platform.canonical_zero) {
+  if (platform.canonical_zero) {
     return 0;
   }
 
