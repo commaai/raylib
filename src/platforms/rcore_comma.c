@@ -599,6 +599,7 @@ static int turn_screen_on () {
 
   f = open_with_retry("/sys/class/backlight/panel0-backlight/brightness", "w");
   if (f) {
+    max_brightness = (int)((max_brightness / 100.0 ) * 65.0);
     fprintf(f, "%lu", max_brightness);
     fclose(f);
   } else {
