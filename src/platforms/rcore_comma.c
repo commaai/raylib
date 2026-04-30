@@ -481,19 +481,19 @@ static int init_egl () {
        continue;
      }
 
-     if (gbm_format == GBM_FORMAT_ABGR8888) {
+     if (gbm_format == GBM_FORMAT_XRGB8888) {
        config = configs[i];
-       free(configs);
        break;
      }
    }
+   free(configs);
 
    if (config == NULL) {
      TRACELOG(LOG_WARNING, "COMMA: Failed to find correct config");
      return -1;
    }
 
-   platform.gbm.surface = gbm_surface_create(platform.gbm.device, platform.drm.mode.hdisplay, platform.drm.mode.vdisplay, GBM_FORMAT_ABGR8888, GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+   platform.gbm.surface = gbm_surface_create(platform.gbm.device, platform.drm.mode.hdisplay, platform.drm.mode.vdisplay, GBM_FORMAT_XRGB8888, GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
    if (!platform.gbm.surface) {
      TRACELOG(LOG_WARNING, "COMMA: Failed to create gbm surface");
      return -1;
@@ -549,7 +549,7 @@ static int get_or_create_fb_for_bo(struct gbm_bo *bo, uint32_t *out_fb) {
     uint32_t offsets[4] = { 0 };
     uint32_t fb_id = 0;
 
-    if (drmModeAddFB2(platform.drm.fd, w, h, GBM_FORMAT_ABGR8888, handles, pitches, offsets, &fb_id, 0) != 0) {
+    if (drmModeAddFB2(platform.drm.fd, w, h, GBM_FORMAT_XRGB8888, handles, pitches, offsets, &fb_id, 0) != 0) {
       return -1;
     }
 
