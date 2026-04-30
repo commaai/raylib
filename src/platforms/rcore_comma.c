@@ -63,7 +63,47 @@
 
 #include <GLES2/gl2.h>
 
-#include <gbm.h>
+#if defined(__has_include)
+    #if __has_include(<gbm.h>)
+        #include <gbm.h>
+        #define COMMA_HAS_GBM_H 1
+    #endif
+#endif
+
+#ifndef COMMA_HAS_GBM_H
+struct gbm_device;
+struct gbm_surface;
+struct gbm_bo;
+
+union gbm_bo_handle {
+    void *ptr;
+    int32_t s32;
+    uint32_t u32;
+    int64_t s64;
+    uint64_t u64;
+};
+
+#define GBM_BO_USE_SCANOUT   (1 << 0)
+#define GBM_BO_USE_RENDERING (1 << 2)
+#define GBM_FORMAT_XRGB8888  ((uint32_t)'X' | ((uint32_t)'R' << 8) | ((uint32_t)'2' << 16) | ((uint32_t)'4' << 24))
+#define GBM_FORMAT_ARGB8888  ((uint32_t)'A' | ((uint32_t)'R' << 8) | ((uint32_t)'2' << 16) | ((uint32_t)'4' << 24))
+#define GBM_FORMAT_XBGR8888  ((uint32_t)'X' | ((uint32_t)'B' << 8) | ((uint32_t)'2' << 16) | ((uint32_t)'4' << 24))
+#define GBM_FORMAT_ABGR8888  ((uint32_t)'A' | ((uint32_t)'B' << 8) | ((uint32_t)'2' << 16) | ((uint32_t)'4' << 24))
+#define GBM_FORMAT_RGB565    ((uint32_t)'R' | ((uint32_t)'G' << 8) | ((uint32_t)'1' << 16) | ((uint32_t)'6' << 24))
+
+struct gbm_device *gbm_create_device(int fd);
+void gbm_device_destroy(struct gbm_device *gbm);
+struct gbm_surface *gbm_surface_create(struct gbm_device *gbm, uint32_t width, uint32_t height, uint32_t format, uint32_t flags);
+struct gbm_bo *gbm_surface_lock_front_buffer(struct gbm_surface *surface);
+void gbm_surface_release_buffer(struct gbm_surface *surface, struct gbm_bo *bo);
+uint32_t gbm_bo_get_width(struct gbm_bo *bo);
+uint32_t gbm_bo_get_height(struct gbm_bo *bo);
+uint32_t gbm_bo_get_stride(struct gbm_bo *bo);
+uint32_t gbm_bo_get_format(struct gbm_bo *bo);
+union gbm_bo_handle gbm_bo_get_handle(struct gbm_bo *bo);
+void *gbm_bo_get_user_data(struct gbm_bo *bo);
+void gbm_bo_set_user_data(struct gbm_bo *bo, void *data, void (*destroy_user_data)(struct gbm_bo *, void *));
+#endif
 
 #include <xf86drm.h>
 #include <xf86drmMode.h>
@@ -114,6 +154,7 @@ struct gbm_platform {
   struct gbm_surface *surface;
   struct gbm_bo *current_bo;
   struct gbm_bo *next_bo;
+  uint32_t surface_format;
   uint32_t current_fb;
   uint32_t next_fb;
 };
@@ -475,25 +516,35 @@ static int init_egl () {
      return -1;
    }
 
-   for (int i = 0; i < num_config; ++i) {
-     EGLint gbm_format;
-     if (!eglGetConfigAttrib(platform.egl.display, configs[i], EGL_NATIVE_VISUAL_ID, &gbm_format)) {
-       continue;
-     }
+   const uint32_t preferred_formats[] = {
+     GBM_FORMAT_XRGB8888,
+     GBM_FORMAT_XBGR8888,
+     GBM_FORMAT_ARGB8888,
+     GBM_FORMAT_ABGR8888,
+     GBM_FORMAT_RGB565,
+   };
+   for (size_t f = 0; f < sizeof(preferred_formats)/sizeof(preferred_formats[0]) && config == NULL; ++f) {
+     for (int i = 0; i < num_config; ++i) {
+       EGLint gbm_format;
+       if (!eglGetConfigAttrib(platform.egl.display, configs[i], EGL_NATIVE_VISUAL_ID, &gbm_format)) {
+         continue;
+       }
 
-     if (gbm_format == GBM_FORMAT_ABGR8888) {
-       config = configs[i];
-       free(configs);
-       break;
+       if ((uint32_t)gbm_format == preferred_formats[f]) {
+         platform.gbm.surface_format = (uint32_t)gbm_format;
+         config = configs[i];
+         break;
+       }
      }
    }
+   free(configs);
 
    if (config == NULL) {
      TRACELOG(LOG_WARNING, "COMMA: Failed to find correct config");
      return -1;
    }
 
-   platform.gbm.surface = gbm_surface_create(platform.gbm.device, platform.drm.mode.hdisplay, platform.drm.mode.vdisplay, GBM_FORMAT_ABGR8888, GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+   platform.gbm.surface = gbm_surface_create(platform.gbm.device, platform.drm.mode.hdisplay, platform.drm.mode.vdisplay, platform.gbm.surface_format, GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
    if (!platform.gbm.surface) {
      TRACELOG(LOG_WARNING, "COMMA: Failed to create gbm surface");
      return -1;
@@ -542,6 +593,7 @@ static int get_or_create_fb_for_bo(struct gbm_bo *bo, uint32_t *out_fb) {
     uint32_t w = gbm_bo_get_width(bo);
     uint32_t h = gbm_bo_get_height(bo);
     uint32_t stride = gbm_bo_get_stride(bo);
+    uint32_t format = gbm_bo_get_format(bo);
     uint32_t handle = gbm_bo_get_handle(bo).u32;
 
     uint32_t handles[4] = { handle };
@@ -549,7 +601,7 @@ static int get_or_create_fb_for_bo(struct gbm_bo *bo, uint32_t *out_fb) {
     uint32_t offsets[4] = { 0 };
     uint32_t fb_id = 0;
 
-    if (drmModeAddFB2(platform.drm.fd, w, h, GBM_FORMAT_ABGR8888, handles, pitches, offsets, &fb_id, 0) != 0) {
+    if (drmModeAddFB2(platform.drm.fd, w, h, format, handles, pitches, offsets, &fb_id, 0) != 0) {
       return -1;
     }
 
@@ -629,15 +681,10 @@ static int init_screen () {
     return -1;
   }
 
-  drmModeCrtc *crtc = drmModeGetCrtc(platform.drm.fd, platform.drm.crtc_id);
-  if (!((crtc->mode_valid != 0) && (crtc->buffer_id != 0))) {
-    if (drmModeSetCrtc(platform.drm.fd, platform.drm.crtc_id, platform.gbm.current_fb, 0, 0, &platform.drm.connector_id, 1, &platform.drm.mode)) {
-      TRACELOG(LOG_WARNING, "COMMA: Failed to set CRTC");
-      return -1;
-    }
+  if (drmModeSetCrtc(platform.drm.fd, platform.drm.crtc_id, platform.gbm.current_fb, 0, 0, &platform.drm.connector_id, 1, &platform.drm.mode)) {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to set CRTC: %s", strerror(errno));
+    return -1;
   }
-
-  drmModeFreeCrtc(crtc);
 
   if (turn_screen_on()) {
     TRACELOG(LOG_WARNING, "COMMA: Failed to turn screen on");
@@ -937,7 +984,7 @@ void SwapScreenBuffer(void) {
   }
 
   if (drmModePageFlip(platform.drm.fd, platform.drm.crtc_id, platform.gbm.next_fb, 0, NULL) != 0) {
-    TRACELOG(LOG_WARNING, "COMMA: Failed to page flip");
+    TRACELOG(LOG_WARNING, "COMMA: Failed to page flip: %s", strerror(errno));
     drmModeRmFB(platform.drm.fd, platform.gbm.next_fb);
     gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
     platform.gbm.next_bo = NULL;
