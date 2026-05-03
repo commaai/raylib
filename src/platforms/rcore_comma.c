@@ -104,6 +104,7 @@ struct drm_platform {
 
   uint32_t connector_id;
   uint32_t crtc_id;
+  bool needs_modeset;
 
   drmModeModeInfo mode;
 };
@@ -631,10 +632,7 @@ static int init_screen () {
 
   drmModeCrtc *crtc = drmModeGetCrtc(platform.drm.fd, platform.drm.crtc_id);
   if (!((crtc->mode_valid != 0) && (crtc->buffer_id != 0))) {
-    if (drmModeSetCrtc(platform.drm.fd, platform.drm.crtc_id, platform.gbm.current_fb, 0, 0, &platform.drm.connector_id, 1, &platform.drm.mode)) {
-      TRACELOG(LOG_WARNING, "COMMA: Failed to set CRTC");
-      return -1;
-    }
+    platform.drm.needs_modeset = true;
   }
 
   drmModeFreeCrtc(crtc);
@@ -936,7 +934,17 @@ void SwapScreenBuffer(void) {
     return;
   }
 
-  if (drmModePageFlip(platform.drm.fd, platform.drm.crtc_id, platform.gbm.next_fb, 0, NULL) != 0) {
+  if (platform.drm.needs_modeset) {
+    if (drmModeSetCrtc(platform.drm.fd, platform.drm.crtc_id, platform.gbm.next_fb, 0, 0, &platform.drm.connector_id, 1, &platform.drm.mode) != 0) {
+      TRACELOG(LOG_WARNING, "COMMA: Failed to set CRTC");
+      drmModeRmFB(platform.drm.fd, platform.gbm.next_fb);
+      gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
+      platform.gbm.next_bo = NULL;
+      platform.gbm.next_fb = 0;
+      return;
+    }
+    platform.drm.needs_modeset = false;
+  } else if (drmModePageFlip(platform.drm.fd, platform.drm.crtc_id, platform.gbm.next_fb, 0, NULL) != 0) {
     TRACELOG(LOG_WARNING, "COMMA: Failed to page flip");
     drmModeRmFB(platform.drm.fd, platform.gbm.next_fb);
     gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
