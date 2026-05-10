@@ -530,7 +530,7 @@ ifeq ($(TARGET_PLATFORM),PLATFORM_DESKTOP_WIN32)
     endif
 endif
 ifeq ($(TARGET_PLATFORM),PLATFORM_COMMA)
-    LDLIBS = -lraylib -lGLESv2 -lEGL -lwayland-client -lwayland-egl -lpthread -lrt -lm -lGL -ldl -latomic
+    LDLIBS = -lraylib -lGLESv2 -lEGL -lgbm -ldrm -lwayland-client -lwayland-egl -lpthread -lrt -lm -lGL -ldl -latomic
 endif
 ifeq ($(TARGET_PLATFORM),$(filter $(TARGET_PLATFORM),PLATFORM_WEB PLATFORM_WEB_RGFW))
     # Libraries for web (HTML5) compiling

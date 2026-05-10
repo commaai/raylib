@@ -591,7 +591,11 @@ static int turn_screen_on () {
   unsigned long max_brightness = 0;
   f = open_with_retry("/sys/class/backlight/panel0-backlight/max_brightness", "r");
   if (f) {
-    fscanf(f, "%lu", &max_brightness);
+    if (fscanf(f, "%lu", &max_brightness) != 1) {
+      TRACELOG(LOG_WARNING, "COMMA: Failed to read max_brightness");
+      fclose(f);
+      return -1;
+    }
     fclose(f);
   } else {
     TRACELOG(LOG_WARNING, "COMMA: Failed to open max_brightness");
@@ -1115,8 +1119,7 @@ int InitPlatform(void) {
   platform.touch.fd = -1;
 
   // only support fullscreen
-  CORE.Window.fullscreen = true;
-  CORE.Window.flags |= FLAG_FULLSCREEN_MODE;
+  FLAG_SET(CORE.Window.flags, FLAG_FULLSCREEN_MODE);
 
   if (init_drm("/dev/dri/card0")) {
     TRACELOG(LOG_FATAL, "COMMA: Failed to initialize drm");
@@ -1132,6 +1135,10 @@ int InitPlatform(void) {
   // swapped since we render in landscape mode
   CORE.Window.currentFbo.width = CORE.Window.screen.height;
   CORE.Window.currentFbo.height = CORE.Window.screen.width;
+  CORE.Window.render.width = CORE.Window.currentFbo.width;
+  CORE.Window.render.height = CORE.Window.currentFbo.height;
+  CORE.Window.renderOffset.x = 0;
+  CORE.Window.renderOffset.y = 0;
 
   if (init_egl()) {
     TRACELOG(LOG_FATAL, "COMMA: Failed to initialize EGL");
@@ -1155,7 +1162,6 @@ int InitPlatform(void) {
   const char *d = getenv("MAGIC_DEBUG");
   platform.debug_mode = (d && d[0] == '1');
 
-  SetupFramebuffer(CORE.Window.currentFbo.width, CORE.Window.currentFbo.height);
   rlLoadExtensions(eglGetProcAddress);
   InitTimer();
   CORE.Storage.basePath = GetWorkingDirectory();
