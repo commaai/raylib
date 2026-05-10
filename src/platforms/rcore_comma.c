@@ -45,6 +45,7 @@
 *     3. This notice may not be removed or altered from any source distribution.
 *
 **********************************************************************************************/
+#include <dirent.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -59,6 +60,7 @@
 #include <linux/input.h>
 
 #include <EGL/egl.h>
+#include <EGL/eglext.h>
 #include <EGL/eglplatform.h>
 
 #include <GLES2/gl2.h>
@@ -126,6 +128,7 @@ typedef struct {
     struct gbm_platform gbm;
     bool canonical_zero;
     bool debug_mode;
+    bool is_legacy_gpu;  // true for proprietary Adreno blob, false for Mesa freedreno
 } PlatformData;
 
 //----------------------------------------------------------------------------------
@@ -449,7 +452,22 @@ static int init_egl () {
      return -1;
    }
 
-   platform.egl.display = eglGetDisplay(platform.gbm.device);
+   // Try Mesa path first (eglGetPlatformDisplay), fall back to legacy Adreno blob (eglGetDisplay)
+   PFNEGLGETPLATFORMDISPLAYEXTPROC get_platform_display =
+       (PFNEGLGETPLATFORMDISPLAYEXTPROC)eglGetProcAddress("eglGetPlatformDisplayEXT");
+
+   if (get_platform_display) {
+     platform.egl.display = get_platform_display(EGL_PLATFORM_GBM_KHR, platform.gbm.device, NULL);
+   }
+
+   if (platform.egl.display == EGL_NO_DISPLAY) {
+     platform.egl.display = eglGetDisplay((EGLNativeDisplayType)platform.gbm.device);
+     platform.is_legacy_gpu = true;
+     TRACELOG(LOG_INFO, "COMMA: Using legacy GPU driver path");
+   } else {
+     TRACELOG(LOG_INFO, "COMMA: Using Mesa GPU driver path");
+   }
+
    if (platform.egl.display == EGL_NO_DISPLAY) {
      TRACELOG(LOG_WARNING, "COMMA: Failed to get an EGL display");
      return -1;
@@ -476,16 +494,29 @@ static int init_egl () {
      return -1;
    }
 
+   uint32_t selected_gbm_format = 0;
    for (int i = 0; i < num_config; ++i) {
      EGLint gbm_format;
      if (!eglGetConfigAttrib(platform.egl.display, configs[i], EGL_NATIVE_VISUAL_ID, &gbm_format)) {
        continue;
      }
 
-     if (gbm_format == GBM_FORMAT_ABGR8888) {
-       config = configs[i];
-       free(configs);
-       break;
+     if (platform.is_legacy_gpu) {
+       // Old Adreno blob only supports ABGR8888
+       if (gbm_format == GBM_FORMAT_ABGR8888) {
+         config = configs[i];
+         selected_gbm_format = gbm_format;
+         free(configs);
+         break;
+       }
+     } else {
+       // Mesa freedreno supports multiple formats
+       if (gbm_format == GBM_FORMAT_ABGR8888 || gbm_format == GBM_FORMAT_ARGB8888 || gbm_format == GBM_FORMAT_XRGB8888) {
+         config = configs[i];
+         selected_gbm_format = gbm_format;
+         free(configs);
+         break;
+       }
      }
    }
 
@@ -494,7 +525,7 @@ static int init_egl () {
      return -1;
    }
 
-   platform.gbm.surface = gbm_surface_create(platform.gbm.device, platform.drm.mode.hdisplay, platform.drm.mode.vdisplay, GBM_FORMAT_ABGR8888, GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+   platform.gbm.surface = gbm_surface_create(platform.gbm.device, platform.drm.mode.hdisplay, platform.drm.mode.vdisplay, selected_gbm_format, GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
    if (!platform.gbm.surface) {
      TRACELOG(LOG_WARNING, "COMMA: Failed to create gbm surface");
      return -1;
@@ -550,7 +581,8 @@ static int get_or_create_fb_for_bo(struct gbm_bo *bo, uint32_t *out_fb) {
     uint32_t offsets[4] = { 0 };
     uint32_t fb_id = 0;
 
-    if (drmModeAddFB2(platform.drm.fd, w, h, GBM_FORMAT_ABGR8888, handles, pitches, offsets, &fb_id, 0) != 0) {
+    uint32_t fb_format = platform.is_legacy_gpu ? GBM_FORMAT_ABGR8888 : gbm_bo_get_format(bo);
+    if (drmModeAddFB2(platform.drm.fd, w, h, fb_format, handles, pitches, offsets, &fb_id, 0) != 0) {
       return -1;
     }
 
@@ -578,8 +610,31 @@ static FILE* open_with_retry(const char *path, const char *mode) {
   return NULL;
 }
 
+static const char *find_backlight(void) {
+  static char path[256];
+  DIR *d = opendir("/sys/class/backlight");
+  if (!d) return NULL;
+  struct dirent *ent;
+  while ((ent = readdir(d)) != NULL) {
+    if (ent->d_name[0] == '.') continue;
+    snprintf(path, sizeof(path), "/sys/class/backlight/%s", ent->d_name);
+    closedir(d);
+    return path;
+  }
+  closedir(d);
+  return NULL;
+}
+
 static int turn_screen_on () {
-  FILE *f = open_with_retry("/sys/class/backlight/panel0-backlight/bl_power", "w");
+  const char *bl = find_backlight();
+  if (!bl) {
+    TRACELOG(LOG_WARNING, "COMMA: No backlight device found");
+    return -1;
+  }
+
+  char filepath[512];
+  snprintf(filepath, sizeof(filepath), "%s/bl_power", bl);
+  FILE *f = open_with_retry(filepath, "w");
   if (f) {
     fputs("0", f);
     fclose(f);
@@ -589,7 +644,8 @@ static int turn_screen_on () {
   }
 
   unsigned long max_brightness = 0;
-  f = open_with_retry("/sys/class/backlight/panel0-backlight/max_brightness", "r");
+  snprintf(filepath, sizeof(filepath), "%s/max_brightness", bl);
+  f = open_with_retry(filepath, "r");
   if (f) {
     fscanf(f, "%lu", &max_brightness);
     fclose(f);
@@ -598,7 +654,8 @@ static int turn_screen_on () {
     return -1;
   }
 
-  f = open_with_retry("/sys/class/backlight/panel0-backlight/brightness", "w");
+  snprintf(filepath, sizeof(filepath), "%s/brightness", bl);
+  f = open_with_retry(filepath, "w");
   if (f) {
     max_brightness = (int)((max_brightness / 100.0 ) * 65.0);
     fprintf(f, "%lu", max_brightness);
