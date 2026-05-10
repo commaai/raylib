@@ -1,5 +1,5 @@
 
-Defines found: 57
+Defines found: 109
 
 Define 001: RAYLIB_H
   Name: RAYLIB_H
@@ -111,177 +111,437 @@ Define 022: RL_MATRIX_TYPE
   Type: GUARD
   Value: 
   Description: 
-Define 023: LIGHTGRAY
-  Name: LIGHTGRAY
+Define 023: _rl_LIGHTGRAY
+  Name: _rl_LIGHTGRAY
   Type: COLOR
   Value: CLITERAL(Color){ 200, 200, 200, 255 }
   Description: Light Gray
-Define 024: GRAY
-  Name: GRAY
+Define 024: _rl_GRAY
+  Name: _rl_GRAY
   Type: COLOR
   Value: CLITERAL(Color){ 130, 130, 130, 255 }
   Description: Gray
-Define 025: DARKGRAY
-  Name: DARKGRAY
+Define 025: _rl_DARKGRAY
+  Name: _rl_DARKGRAY
   Type: COLOR
   Value: CLITERAL(Color){ 80, 80, 80, 255 }
   Description: Dark Gray
-Define 026: YELLOW
-  Name: YELLOW
+Define 026: _rl_YELLOW
+  Name: _rl_YELLOW
   Type: COLOR
   Value: CLITERAL(Color){ 253, 249, 0, 255 }
   Description: Yellow
-Define 027: GOLD
-  Name: GOLD
+Define 027: _rl_GOLD
+  Name: _rl_GOLD
   Type: COLOR
   Value: CLITERAL(Color){ 255, 203, 0, 255 }
   Description: Gold
-Define 028: ORANGE
-  Name: ORANGE
+Define 028: _rl_ORANGE
+  Name: _rl_ORANGE
   Type: COLOR
   Value: CLITERAL(Color){ 255, 161, 0, 255 }
   Description: Orange
-Define 029: PINK
-  Name: PINK
+Define 029: _rl_PINK
+  Name: _rl_PINK
   Type: COLOR
   Value: CLITERAL(Color){ 255, 109, 194, 255 }
   Description: Pink
-Define 030: RED
-  Name: RED
+Define 030: _rl_RED
+  Name: _rl_RED
   Type: COLOR
   Value: CLITERAL(Color){ 230, 41, 55, 255 }
   Description: Red
-Define 031: MAROON
-  Name: MAROON
+Define 031: _rl_MAROON
+  Name: _rl_MAROON
   Type: COLOR
   Value: CLITERAL(Color){ 190, 33, 55, 255 }
   Description: Maroon
-Define 032: GREEN
-  Name: GREEN
+Define 032: _rl_GREEN
+  Name: _rl_GREEN
   Type: COLOR
   Value: CLITERAL(Color){ 0, 228, 48, 255 }
   Description: Green
-Define 033: LIME
-  Name: LIME
+Define 033: _rl_LIME
+  Name: _rl_LIME
   Type: COLOR
   Value: CLITERAL(Color){ 0, 158, 47, 255 }
   Description: Lime
-Define 034: DARKGREEN
-  Name: DARKGREEN
+Define 034: _rl_DARKGREEN
+  Name: _rl_DARKGREEN
   Type: COLOR
   Value: CLITERAL(Color){ 0, 117, 44, 255 }
   Description: Dark Green
-Define 035: SKYBLUE
-  Name: SKYBLUE
+Define 035: _rl_SKYBLUE
+  Name: _rl_SKYBLUE
   Type: COLOR
   Value: CLITERAL(Color){ 102, 191, 255, 255 }
   Description: Sky Blue
-Define 036: BLUE
-  Name: BLUE
+Define 036: _rl_BLUE
+  Name: _rl_BLUE
   Type: COLOR
   Value: CLITERAL(Color){ 0, 121, 241, 255 }
   Description: Blue
-Define 037: DARKBLUE
-  Name: DARKBLUE
+Define 037: _rl_DARKBLUE
+  Name: _rl_DARKBLUE
   Type: COLOR
   Value: CLITERAL(Color){ 0, 82, 172, 255 }
   Description: Dark Blue
-Define 038: PURPLE
-  Name: PURPLE
+Define 038: _rl_PURPLE
+  Name: _rl_PURPLE
   Type: COLOR
   Value: CLITERAL(Color){ 200, 122, 255, 255 }
   Description: Purple
-Define 039: VIOLET
-  Name: VIOLET
+Define 039: _rl_VIOLET
+  Name: _rl_VIOLET
   Type: COLOR
   Value: CLITERAL(Color){ 135, 60, 190, 255 }
   Description: Violet
-Define 040: DARKPURPLE
-  Name: DARKPURPLE
+Define 040: _rl_DARKPURPLE
+  Name: _rl_DARKPURPLE
   Type: COLOR
   Value: CLITERAL(Color){ 112, 31, 126, 255 }
   Description: Dark Purple
-Define 041: BEIGE
-  Name: BEIGE
+Define 041: _rl_BEIGE
+  Name: _rl_BEIGE
   Type: COLOR
   Value: CLITERAL(Color){ 211, 176, 131, 255 }
   Description: Beige
-Define 042: BROWN
-  Name: BROWN
+Define 042: _rl_BROWN
+  Name: _rl_BROWN
   Type: COLOR
   Value: CLITERAL(Color){ 127, 106, 79, 255 }
   Description: Brown
-Define 043: DARKBROWN
-  Name: DARKBROWN
+Define 043: _rl_DARKBROWN
+  Name: _rl_DARKBROWN
   Type: COLOR
   Value: CLITERAL(Color){ 76, 63, 47, 255 }
   Description: Dark Brown
-Define 044: WHITE
-  Name: WHITE
+Define 044: _rl_WHITE
+  Name: _rl_WHITE
   Type: COLOR
   Value: CLITERAL(Color){ 255, 255, 255, 255 }
   Description: White
-Define 045: BLACK
-  Name: BLACK
+Define 045: _rl_BLACK
+  Name: _rl_BLACK
   Type: COLOR
   Value: CLITERAL(Color){ 0, 0, 0, 255 }
   Description: Black
-Define 046: BLANK
-  Name: BLANK
+Define 046: _rl_BLANK
+  Name: _rl_BLANK
   Type: COLOR
   Value: CLITERAL(Color){ 0, 0, 0, 0 }
   Description: Blank (Transparent)
-Define 047: MAGENTA
-  Name: MAGENTA
+Define 047: _rl_MAGENTA
+  Name: _rl_MAGENTA
   Type: COLOR
   Value: CLITERAL(Color){ 255, 0, 255, 255 }
   Description: Magenta
-Define 048: RAYWHITE
-  Name: RAYWHITE
+Define 048: _rl_RAYWHITE
+  Name: _rl_RAYWHITE
   Type: COLOR
   Value: CLITERAL(Color){ 245, 245, 245, 255 }
   Description: My own White (raylib logo)
-Define 049: RL_BOOL_TYPE
+Define 049: LIGHTGRAY
+  Name: LIGHTGRAY
+  Type: UNKNOWN
+  Value: _rl_LIGHTGRAY
+  Description: 
+Define 050: GRAY
+  Name: GRAY
+  Type: UNKNOWN
+  Value: _rl_GRAY
+  Description: 
+Define 051: DARKGRAY
+  Name: DARKGRAY
+  Type: UNKNOWN
+  Value: _rl_DARKGRAY
+  Description: 
+Define 052: YELLOW
+  Name: YELLOW
+  Type: UNKNOWN
+  Value: _rl_YELLOW
+  Description: 
+Define 053: GOLD
+  Name: GOLD
+  Type: UNKNOWN
+  Value: _rl_GOLD
+  Description: 
+Define 054: ORANGE
+  Name: ORANGE
+  Type: UNKNOWN
+  Value: _rl_ORANGE
+  Description: 
+Define 055: PINK
+  Name: PINK
+  Type: UNKNOWN
+  Value: _rl_PINK
+  Description: 
+Define 056: RED
+  Name: RED
+  Type: UNKNOWN
+  Value: _rl_RED
+  Description: 
+Define 057: MAROON
+  Name: MAROON
+  Type: UNKNOWN
+  Value: _rl_MAROON
+  Description: 
+Define 058: GREEN
+  Name: GREEN
+  Type: UNKNOWN
+  Value: _rl_GREEN
+  Description: 
+Define 059: LIME
+  Name: LIME
+  Type: UNKNOWN
+  Value: _rl_LIME
+  Description: 
+Define 060: DARKGREEN
+  Name: DARKGREEN
+  Type: UNKNOWN
+  Value: _rl_DARKGREEN
+  Description: 
+Define 061: SKYBLUE
+  Name: SKYBLUE
+  Type: UNKNOWN
+  Value: _rl_SKYBLUE
+  Description: 
+Define 062: BLUE
+  Name: BLUE
+  Type: UNKNOWN
+  Value: _rl_BLUE
+  Description: 
+Define 063: DARKBLUE
+  Name: DARKBLUE
+  Type: UNKNOWN
+  Value: _rl_DARKBLUE
+  Description: 
+Define 064: PURPLE
+  Name: PURPLE
+  Type: UNKNOWN
+  Value: _rl_PURPLE
+  Description: 
+Define 065: VIOLET
+  Name: VIOLET
+  Type: UNKNOWN
+  Value: _rl_VIOLET
+  Description: 
+Define 066: DARKPURPLE
+  Name: DARKPURPLE
+  Type: UNKNOWN
+  Value: _rl_DARKBLUE
+  Description: 
+Define 067: BEIGE
+  Name: BEIGE
+  Type: UNKNOWN
+  Value: _rl_BEIGE
+  Description: 
+Define 068: BROWN
+  Name: BROWN
+  Type: UNKNOWN
+  Value: _rl_BROWN
+  Description: 
+Define 069: DARKBROWN
+  Name: DARKBROWN
+  Type: UNKNOWN
+  Value: _rl_DARKBROWN
+  Description: 
+Define 070: WHITE
+  Name: WHITE
+  Type: UNKNOWN
+  Value: _rl_WHITE
+  Description: 
+Define 071: BLACK
+  Name: BLACK
+  Type: UNKNOWN
+  Value: _rl_BLACK
+  Description: 
+Define 072: BLANK
+  Name: BLANK
+  Type: UNKNOWN
+  Value: _rl_BLANK
+  Description: 
+Define 073: MAGENTA
+  Name: MAGENTA
+  Type: UNKNOWN
+  Value: _rl_MAGENTA
+  Description: 
+Define 074: RAYWHITE
+  Name: RAYWHITE
+  Type: UNKNOWN
+  Value: _rl_RAYWHITE
+  Description: 
+Define 075: RAYLIB_LIGHTGRAY
+  Name: RAYLIB_LIGHTGRAY
+  Type: UNKNOWN
+  Value: _rl_LIGHTGRAY
+  Description: 
+Define 076: RAYLIB_GRAY
+  Name: RAYLIB_GRAY
+  Type: UNKNOWN
+  Value: _rl_GRAY
+  Description: 
+Define 077: RAYLIB_DARKGRAY
+  Name: RAYLIB_DARKGRAY
+  Type: UNKNOWN
+  Value: _rl_DARKGRAY
+  Description: 
+Define 078: RAYLIB_YELLOW
+  Name: RAYLIB_YELLOW
+  Type: UNKNOWN
+  Value: _rl_YELLOW
+  Description: 
+Define 079: RAYLIB_GOLD
+  Name: RAYLIB_GOLD
+  Type: UNKNOWN
+  Value: _rl_GOLD
+  Description: 
+Define 080: RAYLIB_ORANGE
+  Name: RAYLIB_ORANGE
+  Type: UNKNOWN
+  Value: _rl_ORANGE
+  Description: 
+Define 081: RAYLIB_PINK
+  Name: RAYLIB_PINK
+  Type: UNKNOWN
+  Value: _rl_PINK
+  Description: 
+Define 082: RAYLIB_RED
+  Name: RAYLIB_RED
+  Type: UNKNOWN
+  Value: _rl_RED
+  Description: 
+Define 083: RAYLIB_MAROON
+  Name: RAYLIB_MAROON
+  Type: UNKNOWN
+  Value: _rl_MAROON
+  Description: 
+Define 084: RAYLIB_GREEN
+  Name: RAYLIB_GREEN
+  Type: UNKNOWN
+  Value: _rl_GREEN
+  Description: 
+Define 085: RAYLIB_LIME
+  Name: RAYLIB_LIME
+  Type: UNKNOWN
+  Value: _rl_LIME
+  Description: 
+Define 086: RAYLIB_DARKGREEN
+  Name: RAYLIB_DARKGREEN
+  Type: UNKNOWN
+  Value: _rl_DARKGREEN
+  Description: 
+Define 087: RAYLIB_SKYBLUE
+  Name: RAYLIB_SKYBLUE
+  Type: UNKNOWN
+  Value: _rl_SKYBLUE
+  Description: 
+Define 088: RAYLIB_BLUE
+  Name: RAYLIB_BLUE
+  Type: UNKNOWN
+  Value: _rl_BLUE
+  Description: 
+Define 089: RAYLIB_DARKBLUE
+  Name: RAYLIB_DARKBLUE
+  Type: UNKNOWN
+  Value: _rl_DARKBLUE
+  Description: 
+Define 090: RAYLIB_PURPLE
+  Name: RAYLIB_PURPLE
+  Type: UNKNOWN
+  Value: _rl_PURPLE
+  Description: 
+Define 091: RAYLIB_VIOLET
+  Name: RAYLIB_VIOLET
+  Type: UNKNOWN
+  Value: _rl_VIOLET
+  Description: 
+Define 092: RAYLIB_DARKPURPLE
+  Name: RAYLIB_DARKPURPLE
+  Type: UNKNOWN
+  Value: _rl_DARKBLUE
+  Description: 
+Define 093: RAYLIB_BEIGE
+  Name: RAYLIB_BEIGE
+  Type: UNKNOWN
+  Value: _rl_BEIGE
+  Description: 
+Define 094: RAYLIB_BROWN
+  Name: RAYLIB_BROWN
+  Type: UNKNOWN
+  Value: _rl_BROWN
+  Description: 
+Define 095: RAYLIB_DARKBROWN
+  Name: RAYLIB_DARKBROWN
+  Type: UNKNOWN
+  Value: _rl_DARKBROWN
+  Description: 
+Define 096: RAYLIB_WHITE
+  Name: RAYLIB_WHITE
+  Type: UNKNOWN
+  Value: _rl_WHITE
+  Description: 
+Define 097: RAYLIB_BLACK
+  Name: RAYLIB_BLACK
+  Type: UNKNOWN
+  Value: _rl_BLACK
+  Description: 
+Define 098: RAYLIB_BLANK
+  Name: RAYLIB_BLANK
+  Type: UNKNOWN
+  Value: _rl_BLANK
+  Description: 
+Define 099: RAYLIB_MAGENTA
+  Name: RAYLIB_MAGENTA
+  Type: UNKNOWN
+  Value: _rl_MAGENTA
+  Description: 
+Define 100: RAYLIB_RAYWHITE
+  Name: RAYLIB_RAYWHITE
+  Type: UNKNOWN
+  Value: _rl_RAYWHITE
+  Description: 
+Define 101: RL_BOOL_TYPE
   Name: RL_BOOL_TYPE
   Type: GUARD
   Value: 
   Description: 
-Define 050: MOUSE_LEFT_BUTTON
+Define 102: MOUSE_LEFT_BUTTON
   Name: MOUSE_LEFT_BUTTON
   Type: UNKNOWN
   Value: MOUSE_BUTTON_LEFT
   Description: 
-Define 051: MOUSE_RIGHT_BUTTON
+Define 103: MOUSE_RIGHT_BUTTON
   Name: MOUSE_RIGHT_BUTTON
   Type: UNKNOWN
   Value: MOUSE_BUTTON_RIGHT
   Description: 
-Define 052: MOUSE_MIDDLE_BUTTON
+Define 104: MOUSE_MIDDLE_BUTTON
   Name: MOUSE_MIDDLE_BUTTON
   Type: UNKNOWN
   Value: MOUSE_BUTTON_MIDDLE
   Description: 
-Define 053: MATERIAL_MAP_DIFFUSE
+Define 105: MATERIAL_MAP_DIFFUSE
   Name: MATERIAL_MAP_DIFFUSE
   Type: UNKNOWN
   Value: MATERIAL_MAP_ALBEDO
   Description: 
-Define 054: MATERIAL_MAP_SPECULAR
+Define 106: MATERIAL_MAP_SPECULAR
   Name: MATERIAL_MAP_SPECULAR
   Type: UNKNOWN
   Value: MATERIAL_MAP_METALNESS
   Description: 
-Define 055: SHADER_LOC_MAP_DIFFUSE
+Define 107: SHADER_LOC_MAP_DIFFUSE
   Name: SHADER_LOC_MAP_DIFFUSE
   Type: UNKNOWN
   Value: SHADER_LOC_MAP_ALBEDO
   Description: 
-Define 056: SHADER_LOC_MAP_SPECULAR
+Define 108: SHADER_LOC_MAP_SPECULAR
   Name: SHADER_LOC_MAP_SPECULAR
   Type: UNKNOWN
   Value: SHADER_LOC_MAP_METALNESS
   Description: 
-Define 057: GetMouseRay
+Define 109: GetMouseRay
   Name: GetMouseRay
   Type: UNKNOWN
   Value: GetScreenToWorldRay

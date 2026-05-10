@@ -133,160 +133,472 @@
       "description": ""
     },
     {
-      "name": "LIGHTGRAY",
+      "name": "_rl_LIGHTGRAY",
       "type": "COLOR",
       "value": "CLITERAL(Color){ 200, 200, 200, 255 }",
       "description": "Light Gray"
     },
     {
-      "name": "GRAY",
+      "name": "_rl_GRAY",
       "type": "COLOR",
       "value": "CLITERAL(Color){ 130, 130, 130, 255 }",
       "description": "Gray"
     },
     {
-      "name": "DARKGRAY",
+      "name": "_rl_DARKGRAY",
       "type": "COLOR",
       "value": "CLITERAL(Color){ 80, 80, 80, 255 }",
       "description": "Dark Gray"
     },
     {
-      "name": "YELLOW",
+      "name": "_rl_YELLOW",
       "type": "COLOR",
       "value": "CLITERAL(Color){ 253, 249, 0, 255 }",
       "description": "Yellow"
     },
     {
-      "name": "GOLD",
+      "name": "_rl_GOLD",
       "type": "COLOR",
       "value": "CLITERAL(Color){ 255, 203, 0, 255 }",
       "description": "Gold"
     },
     {
-      "name": "ORANGE",
+      "name": "_rl_ORANGE",
       "type": "COLOR",
       "value": "CLITERAL(Color){ 255, 161, 0, 255 }",
       "description": "Orange"
     },
     {
-      "name": "PINK",
+      "name": "_rl_PINK",
       "type": "COLOR",
       "value": "CLITERAL(Color){ 255, 109, 194, 255 }",
       "description": "Pink"
     },
     {
-      "name": "RED",
+      "name": "_rl_RED",
       "type": "COLOR",
       "value": "CLITERAL(Color){ 230, 41, 55, 255 }",
       "description": "Red"
     },
     {
-      "name": "MAROON",
+      "name": "_rl_MAROON",
       "type": "COLOR",
       "value": "CLITERAL(Color){ 190, 33, 55, 255 }",
       "description": "Maroon"
     },
     {
-      "name": "GREEN",
+      "name": "_rl_GREEN",
       "type": "COLOR",
       "value": "CLITERAL(Color){ 0, 228, 48, 255 }",
       "description": "Green"
     },
     {
-      "name": "LIME",
+      "name": "_rl_LIME",
       "type": "COLOR",
       "value": "CLITERAL(Color){ 0, 158, 47, 255 }",
       "description": "Lime"
     },
     {
-      "name": "DARKGREEN",
+      "name": "_rl_DARKGREEN",
       "type": "COLOR",
       "value": "CLITERAL(Color){ 0, 117, 44, 255 }",
       "description": "Dark Green"
     },
     {
-      "name": "SKYBLUE",
+      "name": "_rl_SKYBLUE",
       "type": "COLOR",
       "value": "CLITERAL(Color){ 102, 191, 255, 255 }",
       "description": "Sky Blue"
     },
     {
-      "name": "BLUE",
+      "name": "_rl_BLUE",
       "type": "COLOR",
       "value": "CLITERAL(Color){ 0, 121, 241, 255 }",
       "description": "Blue"
     },
     {
-      "name": "DARKBLUE",
+      "name": "_rl_DARKBLUE",
       "type": "COLOR",
       "value": "CLITERAL(Color){ 0, 82, 172, 255 }",
       "description": "Dark Blue"
     },
     {
-      "name": "PURPLE",
+      "name": "_rl_PURPLE",
       "type": "COLOR",
       "value": "CLITERAL(Color){ 200, 122, 255, 255 }",
       "description": "Purple"
     },
     {
-      "name": "VIOLET",
+      "name": "_rl_VIOLET",
       "type": "COLOR",
       "value": "CLITERAL(Color){ 135, 60, 190, 255 }",
       "description": "Violet"
     },
     {
-      "name": "DARKPURPLE",
+      "name": "_rl_DARKPURPLE",
       "type": "COLOR",
       "value": "CLITERAL(Color){ 112, 31, 126, 255 }",
       "description": "Dark Purple"
     },
     {
-      "name": "BEIGE",
+      "name": "_rl_BEIGE",
       "type": "COLOR",
       "value": "CLITERAL(Color){ 211, 176, 131, 255 }",
       "description": "Beige"
     },
     {
-      "name": "BROWN",
+      "name": "_rl_BROWN",
       "type": "COLOR",
       "value": "CLITERAL(Color){ 127, 106, 79, 255 }",
       "description": "Brown"
     },
     {
-      "name": "DARKBROWN",
+      "name": "_rl_DARKBROWN",
       "type": "COLOR",
       "value": "CLITERAL(Color){ 76, 63, 47, 255 }",
       "description": "Dark Brown"
     },
     {
-      "name": "WHITE",
+      "name": "_rl_WHITE",
       "type": "COLOR",
       "value": "CLITERAL(Color){ 255, 255, 255, 255 }",
       "description": "White"
     },
     {
-      "name": "BLACK",
+      "name": "_rl_BLACK",
       "type": "COLOR",
       "value": "CLITERAL(Color){ 0, 0, 0, 255 }",
       "description": "Black"
     },
     {
-      "name": "BLANK",
+      "name": "_rl_BLANK",
       "type": "COLOR",
       "value": "CLITERAL(Color){ 0, 0, 0, 0 }",
       "description": "Blank (Transparent)"
     },
     {
-      "name": "MAGENTA",
+      "name": "_rl_MAGENTA",
       "type": "COLOR",
       "value": "CLITERAL(Color){ 255, 0, 255, 255 }",
       "description": "Magenta"
     },
     {
-      "name": "RAYWHITE",
+      "name": "_rl_RAYWHITE",
       "type": "COLOR",
       "value": "CLITERAL(Color){ 245, 245, 245, 255 }",
       "description": "My own White (raylib logo)"
+    },
+    {
+      "name": "LIGHTGRAY",
+      "type": "UNKNOWN",
+      "value": "_rl_LIGHTGRAY",
+      "description": ""
+    },
+    {
+      "name": "GRAY",
+      "type": "UNKNOWN",
+      "value": "_rl_GRAY",
+      "description": ""
+    },
+    {
+      "name": "DARKGRAY",
+      "type": "UNKNOWN",
+      "value": "_rl_DARKGRAY",
+      "description": ""
+    },
+    {
+      "name": "YELLOW",
+      "type": "UNKNOWN",
+      "value": "_rl_YELLOW",
+      "description": ""
+    },
+    {
+      "name": "GOLD",
+      "type": "UNKNOWN",
+      "value": "_rl_GOLD",
+      "description": ""
+    },
+    {
+      "name": "ORANGE",
+      "type": "UNKNOWN",
+      "value": "_rl_ORANGE",
+      "description": ""
+    },
+    {
+      "name": "PINK",
+      "type": "UNKNOWN",
+      "value": "_rl_PINK",
+      "description": ""
+    },
+    {
+      "name": "RED",
+      "type": "UNKNOWN",
+      "value": "_rl_RED",
+      "description": ""
+    },
+    {
+      "name": "MAROON",
+      "type": "UNKNOWN",
+      "value": "_rl_MAROON",
+      "description": ""
+    },
+    {
+      "name": "GREEN",
+      "type": "UNKNOWN",
+      "value": "_rl_GREEN",
+      "description": ""
+    },
+    {
+      "name": "LIME",
+      "type": "UNKNOWN",
+      "value": "_rl_LIME",
+      "description": ""
+    },
+    {
+      "name": "DARKGREEN",
+      "type": "UNKNOWN",
+      "value": "_rl_DARKGREEN",
+      "description": ""
+    },
+    {
+      "name": "SKYBLUE",
+      "type": "UNKNOWN",
+      "value": "_rl_SKYBLUE",
+      "description": ""
+    },
+    {
+      "name": "BLUE",
+      "type": "UNKNOWN",
+      "value": "_rl_BLUE",
+      "description": ""
+    },
+    {
+      "name": "DARKBLUE",
+      "type": "UNKNOWN",
+      "value": "_rl_DARKBLUE",
+      "description": ""
+    },
+    {
+      "name": "PURPLE",
+      "type": "UNKNOWN",
+      "value": "_rl_PURPLE",
+      "description": ""
+    },
+    {
+      "name": "VIOLET",
+      "type": "UNKNOWN",
+      "value": "_rl_VIOLET",
+      "description": ""
+    },
+    {
+      "name": "DARKPURPLE",
+      "type": "UNKNOWN",
+      "value": "_rl_DARKBLUE",
+      "description": ""
+    },
+    {
+      "name": "BEIGE",
+      "type": "UNKNOWN",
+      "value": "_rl_BEIGE",
+      "description": ""
+    },
+    {
+      "name": "BROWN",
+      "type": "UNKNOWN",
+      "value": "_rl_BROWN",
+      "description": ""
+    },
+    {
+      "name": "DARKBROWN",
+      "type": "UNKNOWN",
+      "value": "_rl_DARKBROWN",
+      "description": ""
+    },
+    {
+      "name": "WHITE",
+      "type": "UNKNOWN",
+      "value": "_rl_WHITE",
+      "description": ""
+    },
+    {
+      "name": "BLACK",
+      "type": "UNKNOWN",
+      "value": "_rl_BLACK",
+      "description": ""
+    },
+    {
+      "name": "BLANK",
+      "type": "UNKNOWN",
+      "value": "_rl_BLANK",
+      "description": ""
+    },
+    {
+      "name": "MAGENTA",
+      "type": "UNKNOWN",
+      "value": "_rl_MAGENTA",
+      "description": ""
+    },
+    {
+      "name": "RAYWHITE",
+      "type": "UNKNOWN",
+      "value": "_rl_RAYWHITE",
+      "description": ""
+    },
+    {
+      "name": "RAYLIB_LIGHTGRAY",
+      "type": "UNKNOWN",
+      "value": "_rl_LIGHTGRAY",
+      "description": ""
+    },
+    {
+      "name": "RAYLIB_GRAY",
+      "type": "UNKNOWN",
+      "value": "_rl_GRAY",
+      "description": ""
+    },
+    {
+      "name": "RAYLIB_DARKGRAY",
+      "type": "UNKNOWN",
+      "value": "_rl_DARKGRAY",
+      "description": ""
+    },
+    {
+      "name": "RAYLIB_YELLOW",
+      "type": "UNKNOWN",
+      "value": "_rl_YELLOW",
+      "description": ""
+    },
+    {
+      "name": "RAYLIB_GOLD",
+      "type": "UNKNOWN",
+      "value": "_rl_GOLD",
+      "description": ""
+    },
+    {
+      "name": "RAYLIB_ORANGE",
+      "type": "UNKNOWN",
+      "value": "_rl_ORANGE",
+      "description": ""
+    },
+    {
+      "name": "RAYLIB_PINK",
+      "type": "UNKNOWN",
+      "value": "_rl_PINK",
+      "description": ""
+    },
+    {
+      "name": "RAYLIB_RED",
+      "type": "UNKNOWN",
+      "value": "_rl_RED",
+      "description": ""
+    },
+    {
+      "name": "RAYLIB_MAROON",
+      "type": "UNKNOWN",
+      "value": "_rl_MAROON",
+      "description": ""
+    },
+    {
+      "name": "RAYLIB_GREEN",
+      "type": "UNKNOWN",
+      "value": "_rl_GREEN",
+      "description": ""
+    },
+    {
+      "name": "RAYLIB_LIME",
+      "type": "UNKNOWN",
+      "value": "_rl_LIME",
+      "description": ""
+    },
+    {
+      "name": "RAYLIB_DARKGREEN",
+      "type": "UNKNOWN",
+      "value": "_rl_DARKGREEN",
+      "description": ""
+    },
+    {
+      "name": "RAYLIB_SKYBLUE",
+      "type": "UNKNOWN",
+      "value": "_rl_SKYBLUE",
+      "description": ""
+    },
+    {
+      "name": "RAYLIB_BLUE",
+      "type": "UNKNOWN",
+      "value": "_rl_BLUE",
+      "description": ""
+    },
+    {
+      "name": "RAYLIB_DARKBLUE",
+      "type": "UNKNOWN",
+      "value": "_rl_DARKBLUE",
+      "description": ""
+    },
+    {
+      "name": "RAYLIB_PURPLE",
+      "type": "UNKNOWN",
+      "value": "_rl_PURPLE",
+      "description": ""
+    },
+    {
+      "name": "RAYLIB_VIOLET",
+      "type": "UNKNOWN",
+      "value": "_rl_VIOLET",
+      "description": ""
+    },
+    {
+      "name": "RAYLIB_DARKPURPLE",
+      "type": "UNKNOWN",
+      "value": "_rl_DARKBLUE",
+      "description": ""
+    },
+    {
+      "name": "RAYLIB_BEIGE",
+      "type": "UNKNOWN",
+      "value": "_rl_BEIGE",
+      "description": ""
+    },
+    {
+      "name": "RAYLIB_BROWN",
+      "type": "UNKNOWN",
+      "value": "_rl_BROWN",
+      "description": ""
+    },
+    {
+      "name": "RAYLIB_DARKBROWN",
+      "type": "UNKNOWN",
+      "value": "_rl_DARKBROWN",
+      "description": ""
+    },
+    {
+      "name": "RAYLIB_WHITE",
+      "type": "UNKNOWN",
+      "value": "_rl_WHITE",
+      "description": ""
+    },
+    {
+      "name": "RAYLIB_BLACK",
+      "type": "UNKNOWN",
+      "value": "_rl_BLACK",
+      "description": ""
+    },
+    {
+      "name": "RAYLIB_BLANK",
+      "type": "UNKNOWN",
+      "value": "_rl_BLANK",
+      "description": ""
+    },
+    {
+      "name": "RAYLIB_MAGENTA",
+      "type": "UNKNOWN",
+      "value": "_rl_MAGENTA",
+      "description": ""
+    },
+    {
+      "name": "RAYLIB_RAYWHITE",
+      "type": "UNKNOWN",
+      "value": "_rl_RAYWHITE",
+      "description": ""
     },
     {
       "name": "RL_BOOL_TYPE",
