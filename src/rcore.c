@@ -303,6 +303,7 @@ typedef struct CoreData {
         bool eventWaiting;                  // Wait for events before ending frame
         bool usingFbo;                      // Using FBO (RenderTexture) for rendering instead of default framebuffer
 
+#if defined(PLATFORM_COMMA)
         int rotation_angle;
         Rectangle rotation_source;
         Rectangle rotation_destination;
@@ -311,6 +312,7 @@ typedef struct CoreData {
 
         Shader color_correction_shader;
         char *color_correction_shader_src;
+#endif
 
         Size display;                       // Display width and height (monitor, device-screen, LCD, ...)
         Size screen;                        // Screen current width and height
@@ -753,12 +755,14 @@ void InitWindow(int width, int height, const char *title)
 
     TRACELOG(LOG_INFO, "SYSTEM: Working Directory: %s", GetWorkingDirectory());
 
+#if defined(PLATFORM_COMMA)
     CORE.Window.rotated_fb = LoadRenderTexture(CORE.Window.screen.width, CORE.Window.screen.height);
 
     CORE.Window.color_correction_shader = LoadShaderFromMemory(NULL, CORE.Window.color_correction_shader_src);
     if (!IsShaderValid(CORE.Window.color_correction_shader)) {
       TraceLog(LOG_ERROR, "COMMA: Failed to build color correction shader");
     }
+#endif
 }
 
 // Close window and unload OpenGL context
@@ -909,7 +913,9 @@ void BeginDrawing(void)
     rlLoadIdentity();                   // Reset current matrix (modelview)
     rlMultMatrixf(MatrixToFloat(CORE.Window.screenScale)); // Apply screen scaling
 
+#if defined(PLATFORM_COMMA)
     BeginTextureMode(CORE.Window.rotated_fb);
+#endif
     //rlTranslatef(0.375, 0.375, 0);    // HACK to have 2D pixel-perfect drawing on OpenGL 1.1
                                         // NOTE: Not required with OpenGL 3.3+
 }
@@ -917,6 +923,7 @@ void BeginDrawing(void)
 // End canvas drawing and swap buffers (double buffering)
 void EndDrawing(void)
 {
+#if defined(PLATFORM_COMMA)
     EndTextureMode();
     rlDisableColorBlend();
 
@@ -927,6 +934,9 @@ void EndDrawing(void)
     rlDrawRenderBatchActive();
     rlEnableColorBlend();
 
+#else
+    rlDrawRenderBatchActive();      // Update and draw internal render batch
+#endif
 
 #if SUPPORT_AUTOMATION_EVENTS
     if (automationEventRecording) RecordAutomationEvent();    // Event recording
