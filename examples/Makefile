@@ -303,11 +303,6 @@ ifeq ($(TARGET_PLATFORM),PLATFORM_COMMA)
     INCLUDE_PATHS += -I$(RAYLIB_INCLUDE_PATH)
 endif
 
-# Include GLFW required for examples/others/rlgl_standalone.c
-ifeq ($(USE_EXTERNAL_GLFW),FALSE)
-all others: INCLUDE_PATHS += -I$(RAYLIB_PATH)/src/external/glfw/include
-endif
-
 # Define library paths containing required libs: LDFLAGS
 #------------------------------------------------------------------------------------------------
 LDFLAGS = -L. -L$(RAYLIB_RELEASE_PATH)
@@ -530,7 +525,7 @@ ifeq ($(TARGET_PLATFORM),PLATFORM_DESKTOP_WIN32)
     endif
 endif
 ifeq ($(TARGET_PLATFORM),PLATFORM_COMMA)
-    LDLIBS = -lraylib -lGLESv2 -lEGL -lgbm -ldrm -lwayland-client -lwayland-egl -lpthread -lrt -lm -lGL -ldl -latomic
+    LDLIBS = -lraylib -lGLESv2 -lEGL -lgbm -ldrm -lpthread -lrt -lm -ldl -latomic
 endif
 ifeq ($(TARGET_PLATFORM),$(filter $(TARGET_PLATFORM),PLATFORM_WEB PLATFORM_WEB_RGFW))
     # Libraries for web (HTML5) compiling
