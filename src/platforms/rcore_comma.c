@@ -973,9 +973,6 @@ void SwapScreenBuffer(void) {
   }
 
   platform.gbm.current_bo = platform.gbm.next_bo;
-  platform.gbm.current_fb = platform.gbm.next_fb;
-  platform.gbm.next_bo = NULL;
-  platform.gbm.next_fb = 0;
 }
 
 //----------------------------------------------------------------------------------
@@ -1106,18 +1103,6 @@ void PollInputEvents(void) {
 //----------------------------------------------------------------------------------
 
 int InitPlatform(void) {
-  platform.drm.fd = -1;
-  platform.egl.display = EGL_NO_DISPLAY;
-  platform.egl.surface = EGL_NO_SURFACE;
-  platform.egl.context = EGL_NO_CONTEXT;
-  platform.gbm.device = NULL;
-  platform.gbm.surface = NULL;
-  platform.gbm.current_bo = NULL;
-  platform.gbm.next_bo = NULL;
-  platform.gbm.current_fb = 0;
-  platform.gbm.next_fb = 0;
-  platform.touch.fd = -1;
-
   // only support fullscreen
   FLAG_SET(CORE.Window.flags, FLAG_FULLSCREEN_MODE);
 
@@ -1190,21 +1175,8 @@ void ClosePlatform(void) {
     platform.egl.display = EGL_NO_DISPLAY;
   }
 
-  if (platform.gbm.surface) {
-    if (platform.gbm.next_bo) {
-      gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
-      platform.gbm.next_bo = NULL;
-      platform.gbm.next_fb = 0;
-    }
-
-    if (platform.gbm.current_bo) {
-      gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.current_bo);
-      platform.gbm.current_bo = NULL;
-      platform.gbm.current_fb = 0;
-    }
-
-    gbm_surface_destroy(platform.gbm.surface);
-    platform.gbm.surface = NULL;
+  if (platform.gbm.surface && platform.gbm.next_bo) {
+    gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
   }
 
   if (platform.gbm.device) {
@@ -1212,13 +1184,5 @@ void ClosePlatform(void) {
     platform.gbm.device = NULL;
   }
 
-  if (platform.drm.fd >= 0) {
-    close(platform.drm.fd);
-    platform.drm.fd = -1;
-  }
-
-  if (platform.touch.fd >= 0) {
-    close(platform.touch.fd);
-    platform.touch.fd = -1;
-  }
+  close(platform.touch.fd);
 }
