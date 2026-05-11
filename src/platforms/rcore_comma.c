@@ -948,13 +948,30 @@ void SwapScreenBuffer(void) {
       return;
     }
     platform.drm.needs_modeset = false;
-  } else if (drmModePageFlip(platform.drm.fd, platform.drm.crtc_id, platform.gbm.next_fb, 0, NULL) != 0) {
-    TRACELOG(LOG_WARNING, "COMMA: Failed to page flip");
-    drmModeRmFB(platform.drm.fd, platform.gbm.next_fb);
-    gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
-    platform.gbm.next_bo = NULL;
-    platform.gbm.next_fb = 0;
-    return;
+  } else {
+    errno = 0;
+    int ret = drmModePageFlip(platform.drm.fd, platform.drm.crtc_id, platform.gbm.next_fb, 0, NULL);
+    int err = (errno != 0) ? errno : -ret;
+
+    if ((ret != 0) && (err == EBUSY)) {
+      drmVBlank pending_vblank = {0};
+      pending_vblank.request.type = DRM_VBLANK_RELATIVE;
+      pending_vblank.request.sequence = 1;
+      drmWaitVBlank(platform.drm.fd, &pending_vblank);
+
+      errno = 0;
+      ret = drmModePageFlip(platform.drm.fd, platform.drm.crtc_id, platform.gbm.next_fb, 0, NULL);
+      err = (errno != 0) ? errno : -ret;
+    }
+
+    if (ret != 0) {
+      TRACELOG(LOG_WARNING, "COMMA: Failed to page flip: %s (%i)", strerror(err), err);
+      drmModeRmFB(platform.drm.fd, platform.gbm.next_fb);
+      gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
+      platform.gbm.next_bo = NULL;
+      platform.gbm.next_fb = 0;
+      return;
+    }
   }
 
   drmVBlank v = {0};
