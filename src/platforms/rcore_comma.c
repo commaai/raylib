@@ -101,6 +101,7 @@ struct egl_platform {
 // hold all the low level drm stuff
 struct drm_platform {
   int fd;
+  int magic_fd;
 
   uint32_t connector_id;
   uint32_t crtc_id;
@@ -359,11 +360,11 @@ static int recv_fd(int sock) {
 }
 
 static int init_drm (const char *dev_path) {
-  const char *s = getenv("DRM_FD");
-  if (s) {
+  const char *fd_env = getenv("DRM_FD");
+  if (fd_env) {
     char *end = NULL;
-    long v = strtol(s, &end, 10);
-    if (!*s || *end || v < 0 || v > 0x7fffffff) {
+    long v = strtol(fd_env, &end, 10);
+    if (!*fd_env || *end || v < 0 || v > 0x7fffffff) {
       TRACELOG(LOG_WARNING, "COMMA: Failed to get drm device from env");
       return -1;
     }
@@ -385,10 +386,16 @@ static int init_drm (const char *dev_path) {
 
     if (connect(s, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
       TRACELOG(LOG_WARNING, "COMMA: Failed to connect to magic");
+      close(s);
       return -1;
     }
 
     platform.drm.fd = recv_fd(s);
+    if (platform.drm.fd < 0) {
+      close(s);
+    } else {
+      platform.drm.magic_fd = s;
+    }
   }
 
   if (platform.drm.fd < 0) {
@@ -948,13 +955,30 @@ void SwapScreenBuffer(void) {
       return;
     }
     platform.drm.needs_modeset = false;
-  } else if (drmModePageFlip(platform.drm.fd, platform.drm.crtc_id, platform.gbm.next_fb, 0, NULL) != 0) {
-    TRACELOG(LOG_WARNING, "COMMA: Failed to page flip");
-    drmModeRmFB(platform.drm.fd, platform.gbm.next_fb);
-    gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
-    platform.gbm.next_bo = NULL;
-    platform.gbm.next_fb = 0;
-    return;
+  } else {
+    errno = 0;
+    int ret = drmModePageFlip(platform.drm.fd, platform.drm.crtc_id, platform.gbm.next_fb, 0, NULL);
+    int err = (errno != 0) ? errno : -ret;
+
+    if ((ret != 0) && (err == EBUSY)) {
+      drmVBlank pending_vblank = {0};
+      pending_vblank.request.type = DRM_VBLANK_RELATIVE;
+      pending_vblank.request.sequence = 1;
+      drmWaitVBlank(platform.drm.fd, &pending_vblank);
+
+      errno = 0;
+      ret = drmModePageFlip(platform.drm.fd, platform.drm.crtc_id, platform.gbm.next_fb, 0, NULL);
+      err = (errno != 0) ? errno : -ret;
+    }
+
+    if (ret != 0) {
+      TRACELOG(LOG_WARNING, "COMMA: Failed to page flip: %s (%i)", strerror(err), err);
+      drmModeRmFB(platform.drm.fd, platform.gbm.next_fb);
+      gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
+      platform.gbm.next_bo = NULL;
+      platform.gbm.next_fb = 0;
+      return;
+    }
   }
 
   drmVBlank v = {0};
@@ -1107,6 +1131,7 @@ void PollInputEvents(void) {
 
 int InitPlatform(void) {
   platform.drm.fd = -1;
+  platform.drm.magic_fd = -1;
   platform.egl.display = EGL_NO_DISPLAY;
   platform.egl.surface = EGL_NO_SURFACE;
   platform.egl.context = EGL_NO_CONTEXT;
@@ -1215,6 +1240,11 @@ void ClosePlatform(void) {
   if (platform.drm.fd >= 0) {
     close(platform.drm.fd);
     platform.drm.fd = -1;
+  }
+
+  if (platform.drm.magic_fd >= 0) {
+    close(platform.drm.magic_fd);
+    platform.drm.magic_fd = -1;
   }
 
   if (platform.touch.fd >= 0) {
