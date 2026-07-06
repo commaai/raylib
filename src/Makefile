@@ -191,7 +191,7 @@ ifeq ($(TARGET_PLATFORM),$(filter $(TARGET_PLATFORM),PLATFORM_WEB PLATFORM_WEB_R
         endif
     endif
 endif
-ifeq ($(TARGET_PLATFORM),PLATFORM_COMMA)
+ifeq ($(TARGET_PLATFORM),$(filter $(TARGET_PLATFORM),PLATFORM_COMMA PLATFORM_HEADLESS))
     UNAMEOS = $(shell uname)
     ifeq ($(UNAMEOS),Linux)
         PLATFORM_OS = LINUX
@@ -284,7 +284,7 @@ ifeq ($(TARGET_PLATFORM),PLATFORM_DRM)
     GRAPHICS ?= GRAPHICS_API_OPENGL_ES2
     #GRAPHICS = GRAPHICS_API_OPENGL_SOFTWARE # Uncomment to use software rendering
 endif
-ifeq ($(TARGET_PLATFORM),PLATFORM_COMMA)
+ifeq ($(TARGET_PLATFORM),$(filter $(TARGET_PLATFORM),PLATFORM_COMMA PLATFORM_HEADLESS))
     GRAPHICS = GRAPHICS_API_OPENGL_ES2
 endif
 ifeq ($(TARGET_PLATFORM),PLATFORM_WEB)
@@ -424,7 +424,7 @@ ifeq ($(RAYLIB_BUILD_MODE),RELEASE)
     ifeq ($(TARGET_PLATFORM),PLATFORM_ANDROID)
         CFLAGS += -O2
     endif
-    ifeq ($(TARGET_PLATFORM),PLATFORM_COMMA)
+    ifeq ($(TARGET_PLATFORM),$(filter $(TARGET_PLATFORM),PLATFORM_COMMA PLATFORM_HEADLESS))
         CFLAGS += -O2
     endif
 endif
@@ -490,6 +490,12 @@ ifeq ($(TARGET_PLATFORM),PLATFORM_DRM)
     CFLAGS += -Werror=implicit-function-declaration
 endif
 ifeq ($(TARGET_PLATFORM),PLATFORM_COMMA)
+    CFLAGS += -Werror=implicit-function-declaration
+endif
+ifeq ($(TARGET_PLATFORM),PLATFORM_HEADLESS)
+    # without EGL_NO_X11 eglplatform.h tears Xlib.h in which tears X.h in
+    # which contains a conflicting type Font
+    CFLAGS += -DEGL_NO_X11
     CFLAGS += -Werror=implicit-function-declaration
 endif
 # Use Wayland display on Linux desktop
@@ -745,6 +751,12 @@ ifeq ($(TARGET_PLATFORM),PLATFORM_DESKTOP_WIN32)
 endif
 ifeq ($(TARGET_PLATFORM),PLATFORM_COMMA)
     LDLIBS = -lGLESv2 -lEGL -lgbm -ldrm -lpthread -lrt -lm -ldl
+    ifeq ($(RAYLIB_MODULE_AUDIO),TRUE)
+        LDLIBS += -latomic
+    endif
+endif
+ifeq ($(TARGET_PLATFORM),PLATFORM_HEADLESS)
+    LDLIBS = -lGLESv2 -lEGL -lpthread -lrt -lm -ldl
     ifeq ($(RAYLIB_MODULE_AUDIO),TRUE)
         LDLIBS += -latomic
     endif
