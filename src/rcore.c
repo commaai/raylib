@@ -561,6 +561,8 @@ const char *TextFormat(const char *text, ...); // Formatting of text with variab
     #include "platforms/rcore_android.c"
 #elif defined(PLATFORM_COMMA)
     #include "platforms/rcore_comma.c"
+#elif defined(PLATFORM_HEADLESS)
+    #include "platforms/rcore_headless.c"
 #elif defined(PLATFORM_MEMORY)
     #include "platforms/rcore_memory.c"
 #else
@@ -639,6 +641,8 @@ void InitWindow(int width, int height, const char *title)
     TRACELOG(LOG_INFO, "Platform backend: ANDROID");
 #elif defined(PLATFORM_COMMA)
     TRACELOG(LOG_INFO, "Platform backend: COMMA");
+#elif defined(PLATFORM_HEADLESS)
+    TRACELOG(LOG_INFO, "Platform backend: HEADLESS (EGL surfaceless)");
 #elif defined(PLATFORM_MEMORY)
     TRACELOG(LOG_INFO, "Platform backend: MEMORY (No OS)");
 #else
