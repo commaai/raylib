@@ -4681,6 +4681,14 @@ return {
       returnType = "int"
     },
     {
+      name = "GetTouchTime",
+      description = "Get time of last touch event for a touch point index (platform clock, 0 if not supported)",
+      returnType = "double",
+      params = {
+        {type = "int", name = "index"}
+      }
+    },
+    {
       name = "SetGesturesEnabled",
       description = "Enable a set of gestures using flags",
       returnType = "void",
