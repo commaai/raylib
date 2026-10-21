@@ -374,6 +374,7 @@ typedef struct CoreData {
             int pointId[MAX_TOUCH_POINTS];                  // Point identifiers
             Vector2 position[MAX_TOUCH_POINTS];             // Touch position on screen
             Vector2 previousPosition[MAX_TOUCH_POINTS];     // Previous touch position on screen
+            double time[MAX_TOUCH_POINTS];                  // Time of last touch event (platform clock, 0 if not supported)
             char currentTouchState[MAX_TOUCH_POINTS];       // Registers current touch state
             char previousTouchState[MAX_TOUCH_POINTS];      // Registers previous touch state
 
@@ -4255,6 +4256,16 @@ int GetTouchPointId(int index)
 int GetTouchPointCount(void)
 {
     return CORE.Input.Touch.pointCount;
+}
+
+// Get time of last touch event for a touch point index (platform clock, 0 if not supported)
+double GetTouchTime(int index)
+{
+    double time = 0.0;
+
+    if (index < MAX_TOUCH_POINTS) time = CORE.Input.Touch.time[index];
+
+    return time;
 }
 
 //----------------------------------------------------------------------------------

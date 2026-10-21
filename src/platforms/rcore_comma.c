@@ -53,6 +53,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 
@@ -83,6 +84,7 @@ struct finger {
   FingerState state;
   int x;
   int y;
+  double time;  // kernel time of the last event for this finger, CLOCK_MONOTONIC seconds
   bool resetNextFrame;
 };
 
@@ -656,6 +658,12 @@ static int init_touch(const char *dev_path) {
     return -1;
   }
 
+  // use the same clock as clock_gettime(CLOCK_MONOTONIC) for event times, the default is CLOCK_REALTIME
+  int clock_id = CLOCK_MONOTONIC;
+  if (ioctl(platform.touch.fd, EVIOCSCLOCKID, &clock_id) < 0) {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to set touch clock to CLOCK_MONOTONIC");
+  }
+
   FILE *fp = fopen("/sys/devices/platform/vendor/vendor:gpio-som-id/som_id", "r");
   if (fp != NULL) {
     int origin;
@@ -1055,6 +1063,7 @@ void PollInputEvents(void) {
 
           CORE.Input.Touch.position[i].x = platform.touch.fingers[i].x;
           CORE.Input.Touch.position[i].y = platform.touch.fingers[i].y;
+          CORE.Input.Touch.time[i] = platform.touch.fingers[i].time;
           CORE.Input.Touch.currentTouchState[i] = 1;
 
           // map main finger on mouse for conveniance. raylib already does that
@@ -1065,6 +1074,8 @@ void PollInputEvents(void) {
           }
 
         } else if (platform.touch.fingers[i].state == FINGER_STATE_REMOVING) {
+          CORE.Input.Touch.time[i] = platform.touch.fingers[i].time;
+
           // if we received a touch down and up event in the same frame,
           // delay up event by one frame so that API user needs no special handling
           if (CORE.Input.Touch.previousTouchState[i] == 0) {
@@ -1079,6 +1090,10 @@ void PollInputEvents(void) {
       }
 
     } else if (event.type == EV_ABS) { // raw events. Process these untill we get a sync frame
+      // all events in one frame have the same time as its SYN_REPORT
+      if (event.code != ABS_MT_SLOT) {
+        platform.touch.fingers[slot].time = event.time.tv_sec + event.time.tv_usec * 1e-6;
+      }
 
       if (event.code == ABS_MT_SLOT) { // switch finger
         slot = event.value;
