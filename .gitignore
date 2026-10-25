@@ -138,3 +138,9 @@ raylib.com/
 src/*protocol.h
 src/*protocol-code.h
 src/*protocol-code.c
+
+# Python package artifacts
+__pycache__/
+*.pyc
+*.egg-info/
+dist/

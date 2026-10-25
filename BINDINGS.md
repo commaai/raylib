@@ -188,3 +188,5 @@ Missing some language or wrapper? Feel free to create a new one! :)
 Usually, raylib bindings follow the convention: `raylib-{language}`
 
 Let me know if you're writing a new binding for raylib, I will list it here!
+
+The in-tree [nanobind Python package](python/README.md) provides the selected raylib API used by comma UI applications.
