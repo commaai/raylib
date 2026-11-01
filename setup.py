@@ -26,6 +26,8 @@ def backends():
     defaults = ["desktop"] if SYSTEM == "Darwin" else ["desktop", "headless"]
     if SYSTEM == "Linux" and platform.machine() in ("aarch64", "arm64"):
         defaults.append("comma")
+    if SYSTEM == "Linux" and (Path("/AGNOS").exists() or Path("/TICI").exists()):
+        defaults = ["comma", "headless"]
     selected = os.getenv("RAYLIB_BACKENDS", ",".join(defaults)).split(",")
     selected = [value.strip() for value in selected]
     allowed = {"desktop"} if SYSTEM == "Darwin" else {"desktop", "headless", "comma"}
