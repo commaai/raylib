@@ -6,10 +6,9 @@ build-backend = "setuptools.build_meta"
 name = "raylib-nanobind"
 version = "6.0.0.0"
 description = "Direct nanobind bindings for raylib UI applications"
-readme = "python/README.md"
 requires-python = ">=3.9"
 license = "Zlib AND BSD-3-Clause AND MIT"
-license-files = ["LICENSE", "python/LICENSE.*"]
+license-files = ["LICENSE"]
 
 [tool.setuptools]
 package-dir = {"" = "python"}

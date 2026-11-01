@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sysconfig
 import tempfile
+from importlib.metadata import distribution
 from pathlib import Path
 
 import nanobind
@@ -53,6 +54,12 @@ class BuildBindings(build_ext):
         self.compiler.force = True
         self.backend_build_root = Path(self.build_temp).resolve()
         super().build_extensions()
+        # Ship dependency notices without maintaining copies in this repository.
+        notices = Path(self.build_lib) / "raylib_nb" / "licenses"
+        notices.mkdir(parents=True, exist_ok=True)
+        (notices / "LICENSE.nanobind").write_text(distribution("nanobind").read_text("licenses/LICENSE"))
+        robin_map = nb / "ext" / "robin_map" / "include" / "tsl" / "robin_map.h"
+        (notices / "LICENSE.robin-map").write_text(robin_map.read_text().split("*/", 1)[0] + "*/\n")
 
     def build_extension(self, extension):
         backend = extension.name.rsplit("_", 1)[-1]

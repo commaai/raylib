@@ -1,4 +1,0 @@
-graft src
-recursive-include python *.py *.cc *.h *.md LICENSE.*
-global-exclude *.o *.os *.a *.so *.dylib *.dll *.pyc
-prune python/__pycache__
