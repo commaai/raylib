@@ -957,6 +957,7 @@ void SwapScreenBuffer(void) {
   // disable the CRTC. Restore it when page flipping is no longer possible.
   if (platform.drm.needs_modeset ||
       drmModePageFlip(platform.drm.fd, platform.drm.crtc_id, platform.gbm.next_fb, 0, NULL) != 0) {
+    if (!platform.drm.needs_modeset) TRACELOG(LOG_WARNING, "COMMA: Failed to page flip");
     if (drmModeSetCrtc(platform.drm.fd, platform.drm.crtc_id, platform.gbm.next_fb, 0, 0, &platform.drm.connector_id, 1, &platform.drm.mode) != 0) {
       TRACELOG(LOG_WARNING, "COMMA: Failed to set CRTC");
       gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
