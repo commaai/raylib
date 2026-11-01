@@ -168,6 +168,11 @@ rl.set_trace_log_callback(callback)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("nanobind: leaked", result.stderr)
 
+    def test_invalid_image_allocation(self):
+        for width, height in ((0, 1), (-1, 2), (2, -1), (2**30, 2**30)):
+            with self.subTest(width=width, height=height), self.assertRaises(ValueError):
+                rl.gen_image_color(width, height, rl.WHITE)
+
     def test_cpu_image_operations(self):
         image = rl.gen_image_color(2, 3, rl.Color(10, 20, 30, 255))
         try:

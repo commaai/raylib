@@ -198,7 +198,11 @@ inline void bind_functions(nb::module_ &m) {
     }
     image = {};
   }, nb::arg("image"));
-  m.def("gen_image_color", &GenImageColor, nb::arg("width"), nb::arg("height"), nb::arg("color"), nb::call_guard<nb::gil_scoped_release>());
+  m.def("gen_image_color", [](int width, int height, Color color) {
+    checked_pixel_size(width, height, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+    nb::gil_scoped_release release;
+    return GenImageColor(width, height, color);
+  }, nb::arg("width"), nb::arg("height"), nb::arg("color"));
   m.def("load_texture_from_image", [](nb::handle value) {
     const Image image = checked_image(value);
     nb::gil_scoped_release release;
