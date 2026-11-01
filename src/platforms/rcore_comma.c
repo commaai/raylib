@@ -101,6 +101,8 @@ struct egl_platform {
 // hold all the low level drm stuff
 struct drm_platform {
   int fd;
+  int render_fd;
+  int socket_fd;
 
   uint32_t connector_id;
   uint32_t crtc_id;
@@ -133,7 +135,7 @@ typedef struct {
 //----------------------------------------------------------------------------------
 extern CoreData CORE;                   // Global CORE state context
 
-static PlatformData platform = { 0 };   // Platform specific data
+static PlatformData platform = { .drm = { .fd = -1, .render_fd = -1, .socket_fd = -1 }, .touch = { .fd = -1 } };   // Platform specific data
 
 //----------------------------------------------------------------------------------
 // comma specific code
@@ -342,7 +344,7 @@ static int recv_fd(int sock) {
   msg.msg_control = cmsgbuf;
   msg.msg_controllen = sizeof(cmsgbuf);
 
-  if (recvmsg(sock, &msg, 0) < 0) {
+  if (recvmsg(sock, &msg, MSG_CMSG_CLOEXEC) < 0) {
     TRACELOG(LOG_WARNING, "COMMA: Failed to receive from magic");
     return -1;
   }
@@ -367,12 +369,12 @@ static int init_drm (const char *dev_path) {
       TRACELOG(LOG_WARNING, "COMMA: Failed to get drm device from env");
       return -1;
     }
-    platform.drm.fd = (int)v;
+    platform.drm.fd = fcntl((int)v, F_DUPFD_CLOEXEC, 0);
   } else if (getenv("NO_MASTER")) {
-    platform.drm.fd = open(dev_path, O_RDONLY | O_NONBLOCK);
+    platform.drm.fd = open(dev_path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
   } else {
     const char *sock_path = "/tmp/drmfd.sock";
-    int s = socket(AF_UNIX, SOCK_STREAM, 0);
+    int s = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (s < 0) {
       TRACELOG(LOG_WARNING, "COMMA: Failed to open socket to magic");
       return -1;
@@ -385,9 +387,11 @@ static int init_drm (const char *dev_path) {
 
     if (connect(s, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
       TRACELOG(LOG_WARNING, "COMMA: Failed to connect to magic");
+      close(s);
       return -1;
     }
 
+    platform.drm.socket_fd = s;
     platform.drm.fd = recv_fd(s);
   }
 
@@ -398,6 +402,17 @@ static int init_drm (const char *dev_path) {
 
   if (!drmIsMaster(platform.drm.fd)) {
     TRACELOG(LOG_WARNING, "COMMA: Failed to get master role on %s", dev_path);
+    return -1;
+  }
+
+  // Keep GEM handles and framebuffers on a process-owned DRM file. The
+  // broker's master file outlives us, so objects created there survive crashes.
+  platform.drm.render_fd = open(dev_path, O_RDWR | O_CLOEXEC);
+  drm_magic_t magic;
+  if (platform.drm.render_fd < 0 ||
+      drmGetMagic(platform.drm.render_fd, &magic) != 0 ||
+      drmAuthMagic(platform.drm.fd, magic) != 0) {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to authenticate render device");
     return -1;
   }
 
@@ -443,7 +458,7 @@ static int init_egl () {
    // ask for an OpenGL ES 2 rendering context
    EGLint context_config [] = { EGL_CONTEXT_MAJOR_VERSION, 2, EGL_NONE, EGL_NONE };
 
-   platform.gbm.device = gbm_create_device(platform.drm.fd);
+   platform.gbm.device = gbm_create_device(platform.drm.render_fd);
    if (!platform.gbm.device) {
      TRACELOG(LOG_WARNING, "COMMA: Failed to create gbm device");
      return -1;
@@ -529,7 +544,7 @@ static int init_egl () {
 static void bo_user_data_destroy(struct gbm_bo *bo, void *user_data) {
   uint32_t fb_id = (uint32_t)(uintptr_t)user_data;
   if (fb_id) {
-    drmModeRmFB(platform.drm.fd, fb_id);
+    drmModeRmFB(platform.drm.render_fd, fb_id);
   }
 }
 
@@ -550,7 +565,7 @@ static int get_or_create_fb_for_bo(struct gbm_bo *bo, uint32_t *out_fb) {
     uint32_t offsets[4] = { 0 };
     uint32_t fb_id = 0;
 
-    if (drmModeAddFB2(platform.drm.fd, w, h, GBM_FORMAT_ABGR8888, handles, pitches, offsets, &fb_id, 0) != 0) {
+    if (drmModeAddFB2(platform.drm.render_fd, w, h, GBM_FORMAT_ABGR8888, handles, pitches, offsets, &fb_id, 0) != 0) {
       return -1;
     }
 
@@ -938,23 +953,19 @@ void SwapScreenBuffer(void) {
     return;
   }
 
-  if (platform.drm.needs_modeset) {
+  // Closing another client's DRM file can remove the active framebuffer and
+  // disable the CRTC. Restore it when page flipping is no longer possible.
+  if (platform.drm.needs_modeset ||
+      drmModePageFlip(platform.drm.fd, platform.drm.crtc_id, platform.gbm.next_fb, 0, NULL) != 0) {
     if (drmModeSetCrtc(platform.drm.fd, platform.drm.crtc_id, platform.gbm.next_fb, 0, 0, &platform.drm.connector_id, 1, &platform.drm.mode) != 0) {
       TRACELOG(LOG_WARNING, "COMMA: Failed to set CRTC");
-      drmModeRmFB(platform.drm.fd, platform.gbm.next_fb);
       gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
       platform.gbm.next_bo = NULL;
       platform.gbm.next_fb = 0;
+      platform.drm.needs_modeset = true;
       return;
     }
     platform.drm.needs_modeset = false;
-  } else if (drmModePageFlip(platform.drm.fd, platform.drm.crtc_id, platform.gbm.next_fb, 0, NULL) != 0) {
-    TRACELOG(LOG_WARNING, "COMMA: Failed to page flip");
-    drmModeRmFB(platform.drm.fd, platform.gbm.next_fb);
-    gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
-    platform.gbm.next_bo = NULL;
-    platform.gbm.next_fb = 0;
-    return;
   }
 
   drmVBlank v = {0};
@@ -1175,8 +1186,18 @@ void ClosePlatform(void) {
     platform.egl.display = EGL_NO_DISPLAY;
   }
 
+  if (platform.gbm.surface && platform.gbm.current_bo && platform.gbm.current_bo != platform.gbm.next_bo) {
+    gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.current_bo);
+  }
   if (platform.gbm.surface && platform.gbm.next_bo) {
     gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
+  }
+
+  if (platform.gbm.surface) {
+    gbm_surface_destroy(platform.gbm.surface);
+    platform.gbm.surface = NULL;
+    platform.gbm.next_bo = NULL;
+    platform.gbm.current_bo = NULL;
   }
 
   if (platform.gbm.device) {
@@ -1184,5 +1205,12 @@ void ClosePlatform(void) {
     platform.gbm.device = NULL;
   }
 
+  if (platform.drm.render_fd >= 0) close(platform.drm.render_fd);
+  if (platform.drm.fd >= 0) close(platform.drm.fd);
+  if (platform.drm.socket_fd >= 0) close(platform.drm.socket_fd);
+  platform.drm.render_fd = platform.drm.fd = platform.drm.socket_fd = -1;
   close(platform.touch.fd);
+  platform.touch.fd = -1;
+  platform.drm.needs_modeset = true;
+  platform.gbm.current_fb = platform.gbm.next_fb = 0;
 }
