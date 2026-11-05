@@ -543,10 +543,8 @@ static int init_egl () {
 
 static void bo_user_data_destroy(struct gbm_bo *bo, void *user_data) {
   uint32_t fb_id = (uint32_t)(uintptr_t)user_data;
-  // Don't RmFB on close (ClosePlatform clears CORE.Window.ready first). RmFB of the framebuffer on screen makes
-  // the kernel turn the display off (drm_framebuffer_remove -> drm_crtc_force_disable), and the comma four panel
-  // doesn't come back on until reboot. The kernel still frees all of them when render_fd is closed at the end of
-  // ClosePlatform, like on process exit: msm's preclose takes them off the screen first, so the display stays on.
+  // ClosePlatform clears ready first. Skip RmFB then: RmFB of the on-screen fb turns the display off for good.
+  // Closing render_fd still frees them, and msm's preclose takes them off screen first so the display stays on.
   if (fb_id && CORE.Window.ready) {
     drmModeRmFB(platform.drm.render_fd, fb_id);
   }
