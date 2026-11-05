@@ -543,7 +543,7 @@ static int init_egl () {
 
 static void bo_user_data_destroy(struct gbm_bo *bo, void *user_data) {
   uint32_t fb_id = (uint32_t)(uintptr_t)user_data;
-  // on close, let closing render_fd free these: RmFB of the on-screen fb turns the panel off
+  // skip RmFB on close, close(render_fd) frees the framebuffers instead: RmFB of the one on screen turns the panel off
   if (fb_id && CORE.Window.ready) {
     drmModeRmFB(platform.drm.render_fd, fb_id);
   }
