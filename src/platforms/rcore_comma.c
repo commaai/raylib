@@ -543,8 +543,7 @@ static int init_egl () {
 
 static void bo_user_data_destroy(struct gbm_bo *bo, void *user_data) {
   uint32_t fb_id = (uint32_t)(uintptr_t)user_data;
-  // On close, don't remove the framebuffer: RmFB of the one on screen turns off the CRTC and the panel,
-  // which doesn't come back on. Closing render_fd removes them and only takes down the planes.
+  // on close, let closing render_fd free these: RmFB of the on-screen fb turns the panel off
   if (fb_id && CORE.Window.ready) {
     drmModeRmFB(platform.drm.render_fd, fb_id);
   }
