@@ -541,13 +541,6 @@ static int init_egl () {
    return 0;
 }
 
-static void bo_user_data_destroy(struct gbm_bo *bo, void *user_data) {
-  uint32_t fb_id = (uint32_t)(uintptr_t)user_data;
-  if (fb_id) {
-    drmModeRmFB(platform.drm.render_fd, fb_id);
-  }
-}
-
 static int get_or_create_fb_for_bo(struct gbm_bo *bo, uint32_t *out_fb) {
     void *user_data = gbm_bo_get_user_data(bo);
     if (user_data) {
@@ -569,7 +562,8 @@ static int get_or_create_fb_for_bo(struct gbm_bo *bo, uint32_t *out_fb) {
       return -1;
     }
 
-    gbm_bo_set_user_data(bo, (void*)(uintptr_t)fb_id, bo_user_data_destroy);
+    // no RmFB on destroy: removing the fb on screen turns off the display. the kernel frees fbs when render_fd is closed
+    gbm_bo_set_user_data(bo, (void*)(uintptr_t)fb_id, NULL);
 
     *out_fb = fb_id;
     return 0;
