@@ -562,8 +562,7 @@ static int get_or_create_fb_for_bo(struct gbm_bo *bo, uint32_t *out_fb) {
       return -1;
     }
 
-    // No RmFB on destroy: RmFB of the on-screen fb turns the display off for good. The kernel frees the fbs
-    // when render_fd is closed, and msm's preclose takes them off screen first so the display stays on.
+    // no RmFB on destroy: removing the fb on screen turns off the display. the kernel frees fbs when render_fd is closed
     gbm_bo_set_user_data(bo, (void*)(uintptr_t)fb_id, NULL);
 
     *out_fb = fb_id;
