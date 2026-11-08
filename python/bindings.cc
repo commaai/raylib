@@ -13,6 +13,9 @@ using namespace nb::literals;
 #endif
 
 NB_MODULE(RAYLIB_MODULE, m) {
+  // objects held by daemon threads at interpreter exit are expected, not refcount bugs
+  nb::set_leak_warnings(false);
+
   nb::class_<Vector2>(m, "Vector2")
     .def(nb::init<float, float>(), "x"_a=0.f, "y"_a=0.f)
     .def_rw("x", &Vector2::x).def_rw("y", &Vector2::y);
