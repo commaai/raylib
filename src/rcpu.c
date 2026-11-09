@@ -154,98 +154,14 @@ typedef struct {
   float x, y;
 } point;
 
-// a triangle with a color at each corner, interpolated across it straight and then premultiplied, like GL
-static void triangle(point a, point b, point c, uint32_t color_a, uint32_t color_b, uint32_t color_c) {
-  float area = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-  if (fabsf(area) < 1e-6f) return;
-  if (area < 0) {  // make it counterclockwise on the screen
-    point p = b;
-    b = c;
-    c = p;
-    uint32_t color = color_b;
-    color_b = color_c;
-    color_c = color;
-    area = -area;
-  }
-
-  // the weight of corner k at (x, y) is (wx[k] * x + wy[k] * y + w0[k]) / area, and inside where every weight is >= 0
-  const point corners[3] = {a, b, c};
-  const uint32_t colors[3] = {color_a, color_b, color_c};
-  float wx[3], wy[3], w0[3], inverse_wx[3];
-  for (int k = 0; k < 3; k++) {
-    point p = corners[(k + 1) % 3], q = corners[(k + 2) % 3];
-    wx[k] = p.y - q.y;
-    wy[k] = q.x - p.x;
-    w0[k] = -wy[k] * p.y - wx[k] * p.x;
-    inverse_wx[k] = wx[k] != 0 ? 1.0f / wx[k] : 0.0f;
-  }
-  // and so channel s at (x, y) is cx[s] * x + cy[s] * y + c0[s]
-  bool one_color = color_a == color_b && color_b == color_c;
-  float cx[4] = {0}, cy[4] = {0}, c0[4] = {0.5f, 0.5f, 0.5f, 0.5f};  // the halves round
-  for (int s = 0; s < 4 && !one_color; s++) {
-    for (int k = 0; k < 3; k++) {
-      float channel = ((colors[k] >> (8 * s)) & 255) / area;
-      cx[s] += wx[k] * channel;
-      cy[s] += wy[k] * channel;
-      c0[s] += w0[k] * channel;
-    }
-  }
-  uint32_t premultiplied = premultiply(color_a);
-
-  int top = MAX(first_pixel(fminf(fminf(a.y, b.y), c.y)), T.y0);
-  int bottom = MIN(first_pixel(fmaxf(fmaxf(a.y, b.y), c.y)) + 1, T.y1);
-  for (int y = top; y < bottom; y++) {
-    // the row's span is where every weight is >= 0
-    float center_y = y + 0.5f, left = T.x0, right = T.x1;
-    for (int k = 0; k < 3; k++) {
-      float weight_at_x0 = wy[k] * center_y + w0[k];
-      if (wx[k] > 0) {
-        left = fmaxf(left, -weight_at_x0 * inverse_wx[k]);
-      } else if (wx[k] < 0) {
-        right = fminf(right, -weight_at_x0 * inverse_wx[k]);
-      } else if (weight_at_x0 < 0 || (weight_at_x0 == 0 && wy[k] < 0)) {
-        right = left;  // a center on a bottom edge belongs to the triangle below it
-      }
-    }
-    int x0 = MAX(first_pixel(left), T.x0), x1 = MIN(first_pixel(right), T.x1);
-    if (x0 >= x1) continue;
-
-    uint32_t *dst = row(y);
-    if (one_color) {
-      span(dst + x0, x1 - x0, premultiplied);
-      continue;
-    }
-    float channels[4];
-    for (int s = 0; s < 4; s++) channels[s] = cx[s] * (x0 + 0.5f) + cy[s] * center_y + c0[s];
-    for (int x = x0; x < x1; x++) {
-      uint32_t c = 0;
-      for (int s = 0; s < 4; s++) {
-        float channel = channels[s] + cx[s] * (x - x0);
-        c |= (uint32_t)CLAMP(channel, 0.0f, 255.0f) << (8 * s);
-      }
-      dst[x] = over(dst[x], premultiply(c));
-    }
-  }
-}
-
-void cr_triangles(const float *xy, int count, const uint32_t *colors, int color_count, int mode) {
-  if (count < 3 || (color_count != 1 && color_count != count)) return;
-  point points[count];
-  for (int i = 0; i < count; i++) points[i] = (point){to_x(xy[2 * i]), to_y(xy[2 * i + 1])};
-  int step = mode == CR_TRIANGLE_LIST ? 3 : 1;
-  for (int i = 2; i < count; i += step) {
-    int first = mode == CR_TRIANGLE_FAN ? 0 : i - 2;
-    uint32_t color_first = colors[color_count == 1 ? 0 : first];
-    uint32_t color_before = colors[color_count == 1 ? 0 : i - 1], color_last = colors[color_count == 1 ? 0 : i];
-    triangle(points[first], points[i - 1], points[i], color_first, color_before, color_last);
-  }
-}
-
 // ***** polygons *****
 
-// a polygon's edge, from its top to its bottom
+// a polygon is drawn row by row, between the crossings of its edges with the row's pixel centers where it winds around
+// them. an edge's crossings are found from its top end, so polygons sharing an edge, like a fan's triangles, split its
+// pixels exactly
+
 typedef struct {
-  float x, y, dx_dy;  // its top, and its slope
+  float x, y, dx_dy;  // its top end, and its slope
   int first_row, end_row;  // the rows whose centers it crosses
   int winding;  // 1 going down, -1 going up
 } edge;
@@ -255,49 +171,45 @@ typedef struct {
   int winding;
 } crossing;
 
-static int by_first_row(const void *a, const void *b) {
+// pixels x0 <= x < x1 of row y, drawn with paint
+typedef void (*fill_span)(uint32_t *dst, int x0, int x1, int y, const void *paint);
+
+static int compare_first_rows(const void *a, const void *b) {
   return ((const edge *)a)->first_row - ((const edge *)b)->first_row;
 }
 
-// a row of the polygon at t = t_x * x + t_row from the ramp of colors, n of them premultiplied
-static void ramp_span(uint32_t *dst, int x0, int x1, const uint32_t *ramp, int n, float t_x, float t_row) {
-  if (n == 1 || t_x == 0) {
-    float t = CLAMP(t_row + t_x * (x0 + 0.5f), 0.0f, 1.0f);
-    span(dst + x0, x1 - x0, ramp[(int)(t * (n - 1) + 0.5f)]);
+static void sort_by_first_row(edge *edges, int count) {
+  if (count > 16) {
+    qsort(edges, (size_t)count, sizeof(edge), compare_first_rows);
     return;
   }
-  for (int x = x0; x < x1; x++) {
-    float t = CLAMP(t_row + t_x * (x + 0.5f), 0.0f, 1.0f);
-    dst[x] = over(dst[x], ramp[(int)(t * (n - 1) + 0.5f)]);
+  for (int i = 1; i < count; i++) {
+    edge e = edges[i];
+    int j = i;
+    for (; j > 0 && edges[j - 1].first_row > e.first_row; j--) edges[j] = edges[j - 1];
+    edges[j] = e;
   }
 }
 
-void cr_polygon(const float *xy, int count, const uint32_t *colors, int color_count, float tx, float ty, float t0) {
-  if (count < 3 || color_count < 1) return;
-  uint32_t ramp[color_count];
-  cr_premultiply(ramp, colors, (size_t)color_count);
-  // t at the screen's pixels, before the transform
-  float t_x = tx / T.scale, t_y = ty / T.scale, t_origin = t0 - (tx * T.tx + ty * T.ty) / T.scale;
-
+static void fill_polygon(const point *points, int count, fill_span fill, const void *paint) {
   edge edges[count];
   int edge_count = 0, top = T.y1, bottom = T.y0;
   for (int i = 0; i < count; i++) {
-    int next = (i + 1) % count;
-    float x = to_x(xy[2 * i]), y = to_y(xy[2 * i + 1]), next_x = to_x(xy[2 * next]), next_y = to_y(xy[2 * next + 1]);
-    if (y == next_y) continue;
-    bool down = next_y > y;
-    float top_x = down ? x : next_x, top_y = down ? y : next_y, bottom_y = down ? next_y : y;
-    edge e = {top_x, top_y, (next_x - x) / (next_y - y), MAX(first_pixel(top_y), T.y0), MIN(first_pixel(bottom_y), T.y1),
-              down ? 1 : -1};
+    point p = points[i], q = points[(i + 1) % count];
+    if (p.y == q.y) continue;
+    bool down = q.y > p.y;
+    point top_end = down ? p : q, bottom_end = down ? q : p;
+    edge e = {top_end.x, top_end.y, (bottom_end.x - top_end.x) / (bottom_end.y - top_end.y),
+              MAX(first_pixel(top_end.y), T.y0), MIN(first_pixel(bottom_end.y), T.y1), down ? 1 : -1};
     if (e.first_row >= e.end_row) continue;
     top = MIN(top, e.first_row);
     bottom = MAX(bottom, e.end_row);
     edges[edge_count++] = e;
   }
   if (edge_count == 0) return;
-  qsort(edges, (size_t)edge_count, sizeof(edge), by_first_row);
+  sort_by_first_row(edges, edge_count);
 
-  // row by row, the edges crossing it, sorted along it. pixels are drawn between crossings where they wind around
+  // row by row, the edges crossing it, sorted along it
   int active[edge_count], active_count = 0, next_edge = 0;
   crossing crossings[edge_count];
   for (int y = top; y < bottom; y++) {
@@ -321,8 +233,100 @@ void cr_polygon(const float *xy, int count, const uint32_t *colors, int color_co
     for (int i = 0; i + 1 < active_count; i++) {
       winding += crossings[i].winding;
       int x0 = MAX(first_pixel(crossings[i].x), T.x0), x1 = MIN(first_pixel(crossings[i + 1].x), T.x1);
-      if (winding != 0 && x0 < x1) ramp_span(dst, x0, x1, ramp, color_count, t_x, t_origin + t_y * center_y);
+      if (winding != 0 && x0 < x1) fill(dst, x0, x1, y, paint);
     }
+  }
+}
+
+// a ramp of premultiplied colors along t = t_x * x + t_y * y + t0 at the screen's pixel centers, from t = 0 to 1
+typedef struct {
+  const uint32_t *colors;
+  int count;
+  float t_x, t_y, t0;
+} ramp;
+
+static void fill_ramp(uint32_t *dst, int x0, int x1, int y, const void *paint) {
+  const ramp *r = paint;
+  float t_row = r->t0 + r->t_y * (y + 0.5f);
+  if (r->count == 1 || r->t_x == 0) {
+    float t = CLAMP(t_row + r->t_x * (x0 + 0.5f), 0.0f, 1.0f);
+    span(dst + x0, x1 - x0, r->colors[(int)(t * (r->count - 1) + 0.5f)]);
+    return;
+  }
+  for (int x = x0; x < x1; x++) {
+    float t = CLAMP(t_row + r->t_x * (x + 0.5f), 0.0f, 1.0f);
+    dst[x] = over(dst[x], r->colors[(int)(t * (r->count - 1) + 0.5f)]);
+  }
+}
+
+void cr_polygon(const float *xy, int count, const uint32_t *colors, int color_count, float tx, float ty, float t0) {
+  if (count < 3 || color_count < 1) return;
+  uint32_t premultiplied[color_count];
+  cr_premultiply(premultiplied, colors, (size_t)color_count);
+  // t at the screen's pixels, before the transform
+  ramp paint = {premultiplied, color_count, tx / T.scale, ty / T.scale, t0 - (tx * T.tx + ty * T.ty) / T.scale};
+  point points[count];
+  for (int i = 0; i < count; i++) points[i] = (point){to_x(xy[2 * i]), to_y(xy[2 * i + 1])};
+  fill_polygon(points, count, fill_ramp, &paint);
+}
+
+// colors interpolated straight across a triangle, like GL: channel s at (x, y) is cx[s] * x + cy[s] * y + c0[s]
+typedef struct {
+  float cx[4], cy[4], c0[4];
+} color_planes;
+
+static void fill_planes(uint32_t *dst, int x0, int x1, int y, const void *paint) {
+  const color_planes *planes = paint;
+  float channels[4];
+  for (int s = 0; s < 4; s++) channels[s] = planes->cx[s] * (x0 + 0.5f) + planes->cy[s] * (y + 0.5f) + planes->c0[s];
+  for (int x = x0; x < x1; x++) {
+    uint32_t c = 0;
+    for (int s = 0; s < 4; s++) {
+      float channel = channels[s] + planes->cx[s] * (x - x0);
+      c |= (uint32_t)CLAMP(channel, 0.0f, 255.0f) << (8 * s);
+    }
+    dst[x] = over(dst[x], premultiply(c));
+  }
+}
+
+// a triangle with a color at each corner
+static void triangle(point a, point b, point c, uint32_t color_a, uint32_t color_b, uint32_t color_c) {
+  const point corners[3] = {a, b, c};
+  if (color_a == color_b && color_b == color_c) {
+    uint32_t premultiplied = premultiply(color_a);
+    ramp paint = {&premultiplied, 1, 0.0f, 0.0f, 0.0f};
+    fill_polygon(corners, 3, fill_ramp, &paint);
+    return;
+  }
+  float area = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+  if (fabsf(area) < 1e-6f) return;
+
+  // the weight of corner k at (x, y) is (wx[k] * x + wy[k] * y + w0[k]) / area, from the edge across from it
+  const uint32_t colors[3] = {color_a, color_b, color_c};
+  color_planes planes = {{0}, {0}, {0.5f, 0.5f, 0.5f, 0.5f}};  // the halves round
+  for (int k = 0; k < 3; k++) {
+    point p = corners[(k + 1) % 3], q = corners[(k + 2) % 3];
+    float wx = p.y - q.y, wy = q.x - p.x, w0 = -wy * p.y - wx * p.x;
+    for (int s = 0; s < 4; s++) {
+      float channel = ((colors[k] >> (8 * s)) & 255) / area;
+      planes.cx[s] += wx * channel;
+      planes.cy[s] += wy * channel;
+      planes.c0[s] += w0 * channel;
+    }
+  }
+  fill_polygon(corners, 3, fill_planes, &planes);
+}
+
+void cr_triangles(const float *xy, int count, const uint32_t *colors, int color_count, int mode) {
+  if (count < 3 || (color_count != 1 && color_count != count)) return;
+  point points[count];
+  for (int i = 0; i < count; i++) points[i] = (point){to_x(xy[2 * i]), to_y(xy[2 * i + 1])};
+  int step = mode == CR_TRIANGLE_LIST ? 3 : 1;
+  for (int i = 2; i < count; i += step) {
+    int first = mode == CR_TRIANGLE_FAN ? 0 : i - 2;
+    uint32_t color_first = colors[color_count == 1 ? 0 : first];
+    uint32_t color_before = colors[color_count == 1 ? 0 : i - 1], color_last = colors[color_count == 1 ? 0 : i];
+    triangle(points[first], points[i - 1], points[i], color_first, color_before, color_last);
   }
 }
 
@@ -529,18 +533,29 @@ static struct {
   size_t capacity;
 } NV;
 
-// frame row pixels lo to hi, lo even. a chroma pair is shared by two luma pixels.
+// the luma of a frame pixel, with its chroma pair at u and v, converted like the GPU's NV12 import (limited range BT.601).
 // mixing with the luma is scaling the chroma, as the conversion keeps the luma. with saturation <= 256, channels are -277 to 536
+typedef struct {
+  int red, green, blue;
+} chroma_offsets;
+
+static inline chroma_offsets nv12_chroma(const uint8_t *pair, int saturation) {
+  int u = (pair[0] - 128) * saturation, v = (pair[1] - 128) * saturation;
+  return (chroma_offsets){(409 * v) >> 16, -((100 * u + 208 * v) >> 16), (516 * u) >> 16};
+}
+
+static inline uint32_t nv12_pixel(uint8_t luma, chroma_offsets chroma, const uint8_t *curve) {
+  const uint8_t *mapped = curve + 512 + (((luma - 16) * 298) >> 8);
+  return rgba(mapped[chroma.red], mapped[chroma.green], mapped[chroma.blue], 255);
+}
+
+// frame row pixels lo to hi, lo even. a chroma pair is shared by two luma pixels
 static void nv12_row(uint32_t *restrict dst, const uint8_t *restrict luma, const uint8_t *restrict chroma, int lo, int hi,
                      const uint8_t *restrict curve, int saturation) {
   for (int x = lo; x <= hi; x += 2) {
-    int u = (chroma[x] - 128) * saturation, v = (chroma[x + 1] - 128) * saturation;
-    int red = (409 * v) >> 16, green = -((100 * u + 208 * v) >> 16), blue = (516 * u) >> 16;
-    for (int k = 0; k < 2; k++) {
-      int l = ((luma[x + k] - 16) * 298) >> 8;
-      const uint8_t *mapped = curve + 512 + l;
-      dst[x + k] = rgba(mapped[red], mapped[green], mapped[blue], 255);
-    }
+    chroma_offsets offsets = nv12_chroma(chroma + x, saturation);
+    dst[x] = nv12_pixel(luma[x], offsets, curve);
+    dst[x + 1] = nv12_pixel(luma[x + 1], offsets, curve);
   }
 }
 
@@ -548,12 +563,8 @@ static void nv12_row(uint32_t *restrict dst, const uint8_t *restrict luma, const
 static void nv12_columns(uint32_t *restrict dst, const uint8_t *restrict luma, const uint8_t *restrict chroma,
                          const int *columns, int n, const uint8_t *restrict curve, int saturation) {
   for (int i = 0; i < n; i++) {
-    int x = columns[i], pair = x & ~1;
-    int u = (chroma[pair] - 128) * saturation, v = (chroma[pair + 1] - 128) * saturation;
-    int red = (409 * v) >> 16, green = -((100 * u + 208 * v) >> 16), blue = (516 * u) >> 16;
-    int l = ((luma[x] - 16) * 298) >> 8;
-    const uint8_t *mapped = curve + 512 + l;
-    dst[i] = rgba(mapped[red], mapped[green], mapped[blue], 255);
+    int x = columns[i];
+    dst[i] = nv12_pixel(luma[x], nv12_chroma(chroma + (x & ~1), saturation), curve);
   }
 }
 

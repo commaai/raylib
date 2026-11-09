@@ -44,6 +44,14 @@ class TestCpu(unittest.TestCase):
     cpu.polygon(np.array(square + square, np.float32), np.array([0x80ffffff], np.uint32))
     self.assertEqual(fb[:, :, 3].tolist(), [[128 if 1 <= x < 5 and 1 <= y < 5 else 0 for x in range(8)] for y in range(8)])
 
+  def test_fan_blends_its_center_once(self):
+    fb = target(8, 8)
+    # a circle's fan, around a center on a pixel center
+    angles = np.linspace(0, 2 * np.pi, 13)
+    fan = np.concatenate([[[4.5, 4.5]], np.column_stack([4.5 + 3 * np.cos(angles), 4.5 + 3 * np.sin(angles)])])
+    cpu.triangles(fan.astype(np.float32), np.array([0x40ffffff], np.uint32), cpu.TRIANGLE_FAN)
+    self.assertEqual(set(fb[3:7, 3:7, 3].ravel().tolist()), {64})
+
   def test_polygon_ramp(self):
     fb = target(4, 1)
     red, blue = 0xff0000ff, 0xffff0000

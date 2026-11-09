@@ -17,6 +17,9 @@ inline void cpu_release_target() {
   }
 }
 
+// rcpu keeps points and edges on the stack
+constexpr Py_ssize_t max_points = 1 << 16;
+
 inline uint32_t cpu_color(Color c) { return c.r | c.g << 8 | c.b << 16 | uint32_t(c.a) << 24; }
 
 inline void cpu_check(const RaylibBuffer &buffer, size_t size, const char *what) {
@@ -65,6 +68,7 @@ inline void bind_cpu(nb::module_ &root) {
   m.def("triangles", [](nb::handle points, nb::handle colors, int mode) {
     RaylibBuffer p(points), c(colors);
     if (!p.view.format || std::strcmp(p.view.format, "f") || c.view.itemsize != 4) throw nb::type_error("points must be float32 and colors uint32");
+    if (p.view.len / 8 > max_points) throw nb::value_error("too many points");
     const int count = int(p.view.len / 8), color_count = int(c.view.len / 4);
     if (color_count != 1 && color_count != count) throw nb::value_error("give one color, or one per point");
     if (mode < CR_TRIANGLE_LIST || mode > CR_TRIANGLE_FAN) throw nb::value_error("invalid triangle mode");
@@ -77,6 +81,7 @@ inline void bind_cpu(nb::module_ &root) {
   m.def("polygon", [](nb::handle points, nb::handle colors, float tx, float ty, float t0) {
     RaylibBuffer p(points), c(colors);
     if (!p.view.format || std::strcmp(p.view.format, "f") || c.view.itemsize != 4) throw nb::type_error("points must be float32 and colors uint32");
+    if (p.view.len / 8 > max_points) throw nb::value_error("too many points");
     const int count = int(p.view.len / 8), color_count = int(c.view.len / 4);
     if (color_count < 1 || color_count > 1024) throw nb::value_error("give 1 to 1024 colors");
     nb::gil_scoped_release gil;

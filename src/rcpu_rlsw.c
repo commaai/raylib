@@ -12,9 +12,13 @@
 static void ReturnScreenPixels(void) {}
 #endif
 
+// the texture rcpu draws into, until it changes
+static const sw_texture_t *targeted;
+
 // target what rlsw draws into, top down as its rows are bottom up like GL's, clipped to its scissor
 static void target_color_buffer(void) {
   const sw_texture_t *buffer = RLSW.colorBuffer;
+  targeted = buffer;
   uint8_t *top_row = (uint8_t *)buffer->pixels + (size_t)(buffer->height - 1) * buffer->width * 4;
   cr_target(top_row, buffer->width, buffer->height, -buffer->width * 4);
   if (RLSW.userState & SW_STATE_SCISSOR_TEST) {
@@ -153,7 +157,10 @@ static void drop_masks(void);  // the alpha masks resampled from textures, see b
 
 static void cr_sw_texture_changed(const sw_texture_t *tex) {
   if (tex == &RLSW.framebuffer.color) ReturnScreenPixels();
-  if (tex == RLSW.colorBuffer) cr_target(NULL, 0, 0, 0);  // its pixels are going, until targeted again
+  if (tex == targeted) {  // its pixels are going, until targeted again
+    cr_target(NULL, 0, 0, 0);
+    targeted = NULL;
+  }
   int slot = texture_slot(tex);
   if (slot < 0) return;
   if (blit_sources[slot].a8) drop_masks();
@@ -502,8 +509,10 @@ static bool cr_sw_raster(uint32_t state) {
   if (find_rect(points, count, &rect)) {
     cr_rect(points[rect.top_left].x, points[rect.top_left].y, points[rect.bottom_right].x, points[rect.bottom_right].y,
             colors[rect.top_left], colors[rect.top_right], colors[rect.bottom_left], colors[rect.bottom_right]);
+  } else if (one_color) {
+    cr_polygon(&points[0].x, count, colors, 1, 0, 0, 0);
   } else {
-    cr_triangles(&points[0].x, count, colors, one_color ? 1 : count, CR_TRIANGLE_FAN);
+    cr_triangles(&points[0].x, count, colors, count, CR_TRIANGLE_FAN);
   }
   return true;
 }
