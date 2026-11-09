@@ -138,7 +138,7 @@ extensions = [
         libraries=libraries(backend),
         extra_compile_args=["-std=c++17", "-fvisibility=hidden"],
         extra_link_args=[flag for framework in frameworks for flag in ["-framework", framework]],
-        depends=["python/functions.h", "src/raylib.h", "src/rlgl.h", "src/raymath.h"],
+        depends=["python/functions.h", "python/cpu.h", "src/rcpu.h", "src/raylib.h", "src/rlgl.h", "src/raymath.h"],
         language="c++",
     )
     for backend in backends()

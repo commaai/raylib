@@ -770,7 +770,8 @@ endif
 OBJS = rcore.o \
        rshapes.o \
        rtextures.o \
-       rtext.o
+       rtext.o \
+       rcpu.o
 
 ifeq ($(TARGET_PLATFORM),PLATFORM_DESKTOP_GLFW)
     ifeq ($(USE_EXTERNAL_GLFW),FALSE)
@@ -900,6 +901,10 @@ rtextures.o : rtextures.c raylib.h rlgl.h
 
 # Compile text module
 rtext.o : rtext.c raylib.h
+	$(CC) -c $< $(CFLAGS) $(INCLUDE_PATHS)
+
+# Compile software rasterizer module
+rcpu.o : rcpu.c rcpu.h
 	$(CC) -c $< $(CFLAGS) $(INCLUDE_PATHS)
 
 # Compile models module
