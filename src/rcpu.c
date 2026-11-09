@@ -369,8 +369,9 @@ static inline bool axis_taps(float u, float lo, float hi, int n, bool bilinear, 
   return true;
 }
 
-// the source sampled at taps x and y, times the tint
-static inline uint32_t sample(const uint8_t *src, int stride, bool a8, taps x, taps y, uint32_t tint) {
+// the source sampled at taps x and y, times the tint. inlined into the blit loops, as a call costs more than the mixing
+__attribute__((always_inline)) static inline uint32_t sample(const uint8_t *src, int stride, bool a8, taps x, taps y,
+                                                             uint32_t tint) {
   const uint8_t *top = src + (size_t)y.first * stride;
   const uint8_t *bottom = src + (size_t)y.second * stride;
   bool filtered = x.weight != 0 || y.weight != 0;
@@ -385,10 +386,13 @@ static inline uint32_t sample(const uint8_t *src, int stride, bool a8, taps x, t
   }
   uint32_t c = texel_at(top, false, x.first);
   if (filtered) {
-    uint32_t wx = x.weight * 255 >> 8, wy = y.weight * 255 >> 8;
-    uint32_t top_c = lerp(c, texel_at(top, false, x.second), wx);
-    uint32_t bottom_c = lerp(texel_at(bottom, false, x.first), texel_at(bottom, false, x.second), wx);
-    c = lerp(top_c, bottom_c, wy);
+    uint32_t top_right = texel_at(top, false, x.second);
+    uint32_t bottom_left = texel_at(bottom, false, x.first), bottom_right = texel_at(bottom, false, x.second);
+    // mixing a texel with itself is that texel, as within or around an icon
+    if (top_right != c || bottom_left != c || bottom_right != c) {
+      uint32_t wx = x.weight * 255 >> 8, wy = y.weight * 255 >> 8;
+      c = lerp(lerp(c, top_right, wx), lerp(bottom_left, bottom_right, wx), wy);
+    }
   }
   return tint == 0xffffffff ? c : mul4(c, tint);
 }
