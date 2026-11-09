@@ -86,6 +86,24 @@ class TestCpu(unittest.TestCase):
     if not cpu.software:
       with self.assertRaises(RuntimeError):
         cpu.target_raylib()
+      with self.assertRaises(RuntimeError):
+        cpu.screen()
+
+  def test_screen_is_what_raylib_drew(self):
+    if not cpu.software:
+      self.skipTest("raylib draws with the GPU")
+    rl.init_window(4, 2, "rcpu screen")
+    try:
+      rl.begin_drawing()
+      rl.clear_background(rl.BLACK)
+      rl.draw_rectangle(0, 0, 4, 1, rl.Color(255, 0, 0, 255))
+      rl.end_drawing()
+      # rows are bottom up, like GL's: the top row is last
+      screen = np.frombuffer(cpu.screen(), np.uint8).reshape(2, 4, 4)
+      self.assertEqual(screen[1].tolist(), [[255, 0, 0, 255]] * 4)
+      self.assertEqual(screen[0].tolist(), [[0, 0, 0, 255]] * 4)
+    finally:
+      rl.close_window()
 
 
 if __name__ == "__main__":

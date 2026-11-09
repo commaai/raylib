@@ -58,6 +58,17 @@ inline void bind_cpu(nb::module_ &root) {
     cpu_release_target();
   });
 
+  // raylib's screen as drawn so far, read only and until it draws again: premultiplied RGBA8 rows, bottom up like GL's
+  m.def("screen", []() {
+    const uint8_t *pixels;
+    int width, height;
+    int ret = cr_raylib_screen(&pixels, &width, &height);
+    if (ret) throw nb::builtin_exception(nb::exception_type::runtime_error, std::strerror(-ret));
+    PyObject *view = PyMemoryView_FromMemory((char *)pixels, (Py_ssize_t)width * height * 4, PyBUF_READ);
+    if (!view) throw nb::python_error();
+    return nb::steal(view);
+  });
+
   // rect, triangles and blit are what raylib's own drawing does with rcpu, for tests
   m.def("rect", [](float x0, float y0, float x1, float y1, Color top_left, Color top_right, Color bottom_left, Color bottom_right) {
     cr_rect(x0, y0, x1, y1, cpu_color(top_left), cpu_color(top_right), cpu_color(bottom_left), cpu_color(bottom_right));
