@@ -42,7 +42,9 @@ def libraries(backend):
         return []
     if backend == "desktop":
         return ["GL", "X11", "m", "pthread", "dl", "rt"]
-    return ["GLESv2", "EGL", "m", "pthread", "dl", "rt"] + (["gbm", "drm"] if backend == "comma" else [])
+    if backend == "comma":  # draws on the CPU
+        return ["drm", "m", "pthread", "dl", "rt"]
+    return ["GLESv2", "EGL", "m", "pthread", "dl", "rt"]
 
 
 class BuildBindings(build_ext):
@@ -105,7 +107,7 @@ class BuildBindings(build_ext):
             ]
             archive = directory / f"libraylib_{backend}.a"
             if SYSTEM == "Darwin":
-                objects = ["rcore.o", "rshapes.o", "rtextures.o", "rtext.o", "rmodels.o", "raudio.o", "rglfw.o"]
+                objects = ["rcore.o", "rshapes.o", "rtextures.o", "rtext.o", "rmodels.o", "raudio.o", "rglfw.o", "rcpu.o"]
                 subprocess.run(command + objects, cwd=source, check=True)
                 subprocess.run(["libtool", "-static", "-o", str(archive), *objects], cwd=source, check=True)
             else:
@@ -138,7 +140,7 @@ extensions = [
         libraries=libraries(backend),
         extra_compile_args=["-std=c++17", "-fvisibility=hidden"],
         extra_link_args=[flag for framework in frameworks for flag in ["-framework", framework]],
-        depends=["python/functions.h", "python/cpu.h", "src/rcpu.h", "src/raylib.h", "src/rlgl.h", "src/raymath.h"],
+        depends=["python/functions.h", "python/cpu.h", "src/rcpu.h", "src/rcpu_rlsw.c", "src/raylib.h", "src/rlgl.h", "src/raymath.h"],
         language="c++",
     )
     for backend in backends()

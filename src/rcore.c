@@ -116,6 +116,12 @@
 #if defined(PLATFORM_MEMORY) || defined(PLATFORM_WEB)
     #define SW_GL_FRAMEBUFFER_COPY_BGRA false
 #endif
+#include "rcpu.h"                    // Software rasterizer for the 2D drawing of rlsw
+#if defined(GRAPHICS_API_OPENGL_SOFTWARE)
+    #define SW_MAX_TEXTURES 1024                        // a UI's icons and glyph atlases
+    #define RLSW_RASTER_HOOK cr_sw_raster               // rcpu draws the 2D primitives it can, see rcpu_rlsw.c
+    #define RLSW_TEXTURE_CHANGED cr_sw_texture_changed  // and keeps textures ready for it
+#endif
 #define RLGL_IMPLEMENTATION
 #include "rlgl.h"                   // OpenGL abstraction layer to OpenGL 1.1, 3.3+ or ES2
 
@@ -303,7 +309,7 @@ typedef struct CoreData {
         bool eventWaiting;                  // Wait for events before ending frame
         bool usingFbo;                      // Using FBO (RenderTexture) for rendering instead of default framebuffer
 
-#if defined(PLATFORM_COMMA)
+#if defined(PLATFORM_COMMA) && !defined(GRAPHICS_API_OPENGL_SOFTWARE)
         int rotation_angle;
         Rectangle rotation_source;
         Rectangle rotation_destination;
@@ -571,6 +577,8 @@ const char *TextFormat(const char *text, ...); // Formatting of text with variab
     #pragma message ("WARNING: No [rcore] platform defined")
 #endif
 
+#include "rcpu_rlsw.c"                // rcpu in place of rlsw where it can
+
 //----------------------------------------------------------------------------------
 // Module Functions Definition: Window and Graphics Device
 //----------------------------------------------------------------------------------
@@ -759,7 +767,7 @@ void InitWindow(int width, int height, const char *title)
 
     TRACELOG(LOG_INFO, "SYSTEM: Working Directory: %s", GetWorkingDirectory());
 
-#if defined(PLATFORM_COMMA)
+#if defined(PLATFORM_COMMA) && !defined(GRAPHICS_API_OPENGL_SOFTWARE)
     CORE.Window.rotated_fb = LoadRenderTexture(CORE.Window.screen.width, CORE.Window.screen.height);
 
     CORE.Window.color_correction_shader = LoadShaderFromMemory(NULL, CORE.Window.color_correction_shader_src);
@@ -917,7 +925,7 @@ void BeginDrawing(void)
     rlLoadIdentity();                   // Reset current matrix (modelview)
     rlMultMatrixf(MatrixToFloat(CORE.Window.screenScale)); // Apply screen scaling
 
-#if defined(PLATFORM_COMMA)
+#if defined(PLATFORM_COMMA) && !defined(GRAPHICS_API_OPENGL_SOFTWARE)
     BeginTextureMode(CORE.Window.rotated_fb);
 #endif
     //rlTranslatef(0.375, 0.375, 0);    // HACK to have 2D pixel-perfect drawing on OpenGL 1.1
@@ -927,7 +935,7 @@ void BeginDrawing(void)
 // End canvas drawing and swap buffers (double buffering)
 void EndDrawing(void)
 {
-#if defined(PLATFORM_COMMA)
+#if defined(PLATFORM_COMMA) && !defined(GRAPHICS_API_OPENGL_SOFTWARE)
     EndTextureMode();
     rlDisableColorBlend();
 

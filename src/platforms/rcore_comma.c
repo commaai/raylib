@@ -58,12 +58,14 @@
 
 #include <linux/input.h>
 
+#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
 #include <EGL/egl.h>
 #include <EGL/eglplatform.h>
 
 #include <GLES2/gl2.h>
 
 #include <gbm.h>
+#endif
 
 #include <xf86drm.h>
 #include <xf86drmMode.h>
@@ -91,12 +93,14 @@ struct touch {
   int fd;
 };
 
+#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
 // hold all the low level egl stuff
 struct egl_platform {
   EGLDisplay display;
   EGLSurface surface;
   EGLContext context;
 };
+#endif
 
 // hold all the low level drm stuff
 struct drm_platform {
@@ -111,6 +115,7 @@ struct drm_platform {
   drmModeModeInfo mode;
 };
 
+#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
 // hold all the low level gbm stuff
 struct gbm_platform {
   struct gbm_device *device;
@@ -120,12 +125,17 @@ struct gbm_platform {
   uint32_t current_fb;
   uint32_t next_fb;
 };
+#endif
 
 typedef struct {
+#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
     struct egl_platform egl;
+#endif
     struct touch touch;
     struct drm_platform drm;
+#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
     struct gbm_platform gbm;
+#endif
     bool canonical_zero;
     bool debug_mode;
 } PlatformData;
@@ -141,6 +151,7 @@ static PlatformData platform = { .drm = { .fd = -1, .render_fd = -1, .socket_fd 
 // comma specific code
 //----------------------------------------------------------------------------------
 
+#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
 #define CASE_STR( value ) case value: return #value;
 const char *eglGetErrorString(EGLint error) {
     switch(error) {
@@ -162,6 +173,7 @@ const char *eglGetErrorString(EGLint error) {
       default: return "Unknown";
     }
 }
+#endif
 #undef CASE_STR
 
 // These are actually float16s, so need to be converted before use
@@ -171,6 +183,7 @@ struct __attribute__((__packed__)) color_correction_values {
   uint16_t rgb_color_gains[3];
 };
 
+#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
 static const char *color_correction_fragment_shader_template =
     "#version 100\n"
     "precision mediump float;\n"
@@ -192,6 +205,7 @@ static const char *color_correction_fragment_shader_template =
     "    c.rgb = pow(c.rgb, vec3(%f/2.2, %f/2.2, %f/2.2));\n"
     "    gl_FragColor = c;\n"
     "}\n";
+#endif
 
 float decode_float16(uint16_t value){
   uint32_t sign = value >> 15;
@@ -274,6 +288,7 @@ err:
   return NULL;
 }
 
+#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
 static int init_color_correction(void) {
   int ret;
   char *shader = NULL;
@@ -330,6 +345,78 @@ err:
   if (shader != NULL) free(shader);
   return -1;
 }
+#else
+#include "rcore_comma_display.c"
+
+// the blobs of the display's degamma, matrix and gamma blocks, as msm_drm_pp.h's drm_msm_igc_lut, drm_msm_pcc and
+// drm_msm_pgc_lut: flags first, and padded to 8 bytes
+typedef struct {
+  uint64_t flags;
+  uint32_t lut[3][256];  // per channel, 12 bit
+  uint32_t strength;
+} igc_blob;
+
+typedef struct {
+  int32_t c, r, g, b, rg, gb, rb, rgb;  // an output channel's terms, in 1/32768
+} pcc_coefficients;
+
+typedef struct {
+  uint64_t flags;
+  pcc_coefficients channels[3];
+  int32_t second_order[9];
+} pcc_blob;
+
+typedef struct {
+  uint64_t flags;
+  uint32_t lut[3][512];  // per channel, two 10 bit entries per word
+} gc_blob;
+
+// the color calibration in the display's own degamma, matrix and gamma blocks, as the GL path's shader does it
+static void set_color_correction(bool enable) {
+  static const char *names[3] = {"SDE_DSPP_IGC_V3", "SDE_DSPP_PCC_V4", "SDE_DSPP_GC_V1"};
+  static igc_blob igc;
+  static pcc_blob pcc;
+  static gc_blob gc;
+  struct color_correction_values *ccv = enable && !platform.canonical_zero ? read_correction_values() : NULL;
+  float gamma = 0.0f, ccm[9], gains[3];
+  bool valid = ccv != NULL;
+  if (ccv) {
+    gamma = decode_float16(ccv->gamma);
+    valid = isfinite(gamma) && gamma > 0.0f;
+    for (int i = 0; i < 9; i++) {
+      ccm[i] = decode_float16(ccv->ccm[i]);
+      valid = valid && isfinite(ccm[i]);
+    }
+    for (int i = 0; i < 3; i++) {
+      gains[i] = decode_float16(ccv->rgb_color_gains[i]);
+      valid = valid && isfinite(gains[i]) && gains[i] > 0.0f;
+    }
+    free(ccv);
+  }
+  if (!valid) {
+    for (int i = 0; i < 3; i++) set_crtc_blob(names[i], NULL, 0);
+    return;
+  }
+  for (int c = 0; c < 3; c++) {
+    for (int i = 0; i < 256; i++) igc.lut[c][i] = (uint32_t)roundf(powf(i / 255.0f, 2.2f) * 4095.0f);
+    for (int i = 0; i < 512; i++) {
+      uint32_t lo = (uint32_t)roundf(powf((2*i) / 1023.0f, 1.0f / gamma / 2.2f) * 1023.0f);
+      uint32_t hi = (uint32_t)roundf(powf((2*i + 1) / 1023.0f, 1.0f / gamma / 2.2f) * 1023.0f);
+      gc.lut[c][i] = lo | hi << 16;
+    }
+    pcc_coefficients *out = &pcc.channels[c];
+    out->r = (int32_t)roundf(ccm[0*3 + c] / gains[0] * 32768.0f);
+    out->g = (int32_t)roundf(ccm[1*3 + c] / gains[1] * 32768.0f);
+    out->b = (int32_t)roundf(ccm[2*3 + c] / gains[2] * 32768.0f);
+  }
+  const void *blobs[3] = {&igc, &pcc, &gc};
+  const uint32_t sizes[3] = {sizeof(igc), sizeof(pcc), sizeof(gc)};
+  for (int i = 0; i < 3; i++) {
+    int ret = set_crtc_blob(names[i], blobs[i], sizes[i]);
+    if (ret) TRACELOG(LOG_WARNING, "COMMA: Failed to set %s: %s", names[i], strerror(-ret));
+  }
+}
+#endif
 
 static int recv_fd(int sock) {
   struct msghdr msg = {0};
@@ -441,6 +528,7 @@ static int init_drm (const char *dev_path) {
   return 0;
 }
 
+#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
 static int init_egl () {
    EGLint major;
    EGLint minor;
@@ -568,6 +656,7 @@ static int get_or_create_fb_for_bo(struct gbm_bo *bo, uint32_t *out_fb) {
     *out_fb = fb_id;
     return 0;
 }
+#endif
 
 static FILE* open_with_retry(const char *path, const char *mode) {
   const int sleep_ms = 50;
@@ -624,6 +713,14 @@ static int turn_screen_on () {
   return 0;
 }
 
+// the first frame sets the CRTC again if it's off
+static void check_crtc(void) {
+  drmModeCrtc *crtc = drmModeGetCrtc(platform.drm.fd, platform.drm.crtc_id);
+  platform.drm.needs_modeset = !crtc || !crtc->mode_valid || !crtc->buffer_id;
+  drmModeFreeCrtc(crtc);
+}
+
+#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
 static int init_screen () {
   CORE.Window.rotation_angle = platform.canonical_zero ? 270 : 90;
   CORE.Window.rotation_source = (Rectangle){0.0, 0.0, CORE.Window.screen.width, -((int)CORE.Window.screen.height)};
@@ -643,12 +740,7 @@ static int init_screen () {
     return -1;
   }
 
-  drmModeCrtc *crtc = drmModeGetCrtc(platform.drm.fd, platform.drm.crtc_id);
-  if (!((crtc->mode_valid != 0) && (crtc->buffer_id != 0))) {
-    platform.drm.needs_modeset = true;
-  }
-
-  drmModeFreeCrtc(crtc);
+  check_crtc();
 
   if (turn_screen_on()) {
     TRACELOG(LOG_WARNING, "COMMA: Failed to turn screen on");
@@ -657,6 +749,17 @@ static int init_screen () {
 
   return 0;
 }
+#else
+static int init_screen(void) {
+  int ret = display_init();
+  if (ret) {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to initialize the display: %s", strerror(-ret));
+    return -1;
+  }
+  check_crtc();
+  return turn_screen_on();
+}
+#endif
 
 static int init_touch(const char *dev_path) {
   platform.touch.fd = open(dev_path, O_RDONLY|O_NONBLOCK);
@@ -928,10 +1031,38 @@ void DisableCursor(void) {
   CORE.Input.Mouse.cursorHidden = true;
 }
 
-// Swap back buffer with front buffer (screen drawing)
-void SwapScreenBuffer(void) {
-  static uint32_t vblank_id = 0;
+// show a framebuffer at the next vblank, and wait for it
+static bool present_framebuffer(uint32_t framebuffer) {
+  // Closing another client's DRM file can remove the active framebuffer and
+  // disable the CRTC. Restore it when page flipping is no longer possible.
+  if (platform.drm.needs_modeset ||
+      drmModePageFlip(platform.drm.fd, platform.drm.crtc_id, framebuffer, 0, NULL) != 0) {
+    if (!platform.drm.needs_modeset) TRACELOG(LOG_WARNING, "COMMA: Failed to page flip");
+    if (drmModeSetCrtc(platform.drm.fd, platform.drm.crtc_id, framebuffer, 0, 0, &platform.drm.connector_id, 1, &platform.drm.mode) != 0) {
+      TRACELOG(LOG_WARNING, "COMMA: Failed to set CRTC");
+      platform.drm.needs_modeset = true;
+      return false;
+    }
+    platform.drm.needs_modeset = false;
+  }
 
+  static uint32_t vblank_id = 0;
+  drmVBlank v = {0};
+  v.request.type = DRM_VBLANK_RELATIVE;
+  v.request.sequence = 1;
+  drmWaitVBlank(platform.drm.fd, &v);
+  if (platform.debug_mode) {
+    if ((v.reply.sequence - vblank_id) > 1) {
+      TRACELOG(LOG_WARNING, "%i FRAME(s) DROPPED!", (v.reply.sequence - vblank_id) - 1);
+    }
+  }
+  vblank_id = v.reply.sequence;
+  return true;
+}
+
+// Swap back buffer with front buffer (screen drawing)
+#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
+void SwapScreenBuffer(void) {
   eglSwapBuffers(platform.egl.display, platform.egl.surface);
 
   platform.gbm.next_bo = gbm_surface_lock_front_buffer(platform.gbm.surface);
@@ -947,32 +1078,12 @@ void SwapScreenBuffer(void) {
     return;
   }
 
-  // Closing another client's DRM file can remove the active framebuffer and
-  // disable the CRTC. Restore it when page flipping is no longer possible.
-  if (platform.drm.needs_modeset ||
-      drmModePageFlip(platform.drm.fd, platform.drm.crtc_id, platform.gbm.next_fb, 0, NULL) != 0) {
-    if (!platform.drm.needs_modeset) TRACELOG(LOG_WARNING, "COMMA: Failed to page flip");
-    if (drmModeSetCrtc(platform.drm.fd, platform.drm.crtc_id, platform.gbm.next_fb, 0, 0, &platform.drm.connector_id, 1, &platform.drm.mode) != 0) {
-      TRACELOG(LOG_WARNING, "COMMA: Failed to set CRTC");
-      gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
-      platform.gbm.next_bo = NULL;
-      platform.gbm.next_fb = 0;
-      platform.drm.needs_modeset = true;
-      return;
-    }
-    platform.drm.needs_modeset = false;
+  if (!present_framebuffer(platform.gbm.next_fb)) {
+    gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
+    platform.gbm.next_bo = NULL;
+    platform.gbm.next_fb = 0;
+    return;
   }
-
-  drmVBlank v = {0};
-  v.request.type = DRM_VBLANK_RELATIVE;
-  v.request.sequence = 1;
-  drmWaitVBlank(platform.drm.fd, &v);
-  if (platform.debug_mode) {
-    if ((v.reply.sequence - vblank_id) > 1) {
-      TRACELOG(LOG_WARNING, "%i FRAME(s) DROPPED!", (v.reply.sequence - vblank_id) - 1);
-    }
-  }
-  vblank_id = v.reply.sequence;
 
   if (platform.gbm.current_bo) {
     gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.current_bo);
@@ -980,6 +1091,47 @@ void SwapScreenBuffer(void) {
 
   platform.gbm.current_bo = platform.gbm.next_bo;
 }
+#else
+// rlsw's own framebuffer pixels, while it draws straight into the display's target instead
+static void *rlsw_pixels;
+// the CRTC only takes color correction once it shows a frame
+static bool color_corrected;
+
+void SwapScreenBuffer(void) {
+  sw_texture_t *screen = &RLSW.framebuffer.color;
+  uint8_t *target = display_target(screen->width, screen->height);
+  if (!target) {
+    TRACELOG(LOG_WARNING, "COMMA: Framebuffer doesn't fit the display");
+    return;
+  }
+  if (screen->pixels != target) {
+    // from now on rlsw draws into the display's target, until ReturnScreenPixels
+    memcpy(target, screen->pixels, (size_t)screen->width * screen->height * 4);
+    rlsw_pixels = screen->pixels;
+    screen->pixels = target;
+  }
+
+  uint32_t framebuffer;
+  int ret = display_rotate(&framebuffer);
+  if (ret) {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to rotate the frame: %s", strerror(-ret));
+    return;
+  }
+  if (!present_framebuffer(framebuffer)) return;
+  display_shown();
+  if (!color_corrected) {
+    set_color_correction(true);
+    color_corrected = true;
+  }
+}
+
+// rlsw is about to resize or free its framebuffer: give it its own pixels back
+static void ReturnScreenPixels(void) {
+  if (!rlsw_pixels) return;
+  RLSW.framebuffer.color.pixels = rlsw_pixels;
+  rlsw_pixels = NULL;
+}
+#endif
 
 //----------------------------------------------------------------------------------
 // Module Functions Definition: Misc
@@ -1123,18 +1275,26 @@ int InitPlatform(void) {
   CORE.Window.display.width = CORE.Window.screen.width;
   CORE.Window.display.height = CORE.Window.screen.height;
 
+#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
   // swapped since we render in landscape mode
   CORE.Window.currentFbo.width = CORE.Window.screen.height;
   CORE.Window.currentFbo.height = CORE.Window.screen.width;
+#else
+  // drawn in landscape, the display's rotator turns it to the panel
+  CORE.Window.currentFbo.width = CORE.Window.screen.width;
+  CORE.Window.currentFbo.height = CORE.Window.screen.height;
+#endif
   CORE.Window.render.width = CORE.Window.currentFbo.width;
   CORE.Window.render.height = CORE.Window.currentFbo.height;
   CORE.Window.renderOffset.x = 0;
   CORE.Window.renderOffset.y = 0;
 
+#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
   if (init_egl()) {
     TRACELOG(LOG_FATAL, "COMMA: Failed to initialize EGL");
     return -1;
   }
+#endif
 
   if (init_touch("/dev/input/event2")) {
     TRACELOG(LOG_FATAL, "COMMA: Failed to initialize touch device");
@@ -1146,14 +1306,18 @@ int InitPlatform(void) {
     return -1;
   }
 
+#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
   if (init_color_correction()) {
     TRACELOG(LOG_WARNING, "COMMA: Failed to initialize color correction");
   }
+#endif
 
   const char *d = getenv("MAGIC_DEBUG");
   platform.debug_mode = (d && d[0] == '1');
 
+#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
   rlLoadExtensions(eglGetProcAddress);
+#endif
   InitTimer();
   CORE.Storage.basePath = GetWorkingDirectory();
 
@@ -1166,6 +1330,13 @@ int InitPlatform(void) {
 void ClosePlatform(void) {
   CORE.Window.ready = false;
 
+#if defined(GRAPHICS_API_OPENGL_SOFTWARE)
+  if (platform.drm.fd >= 0) {
+    set_color_correction(false);
+    color_corrected = false;
+    display_close();
+  }
+#else
   if (platform.egl.display != EGL_NO_DISPLAY) {
     eglMakeCurrent(platform.egl.display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 
@@ -1199,6 +1370,7 @@ void ClosePlatform(void) {
     gbm_device_destroy(platform.gbm.device);
     platform.gbm.device = NULL;
   }
+#endif
 
   if (platform.drm.render_fd >= 0) close(platform.drm.render_fd);
   if (platform.drm.fd >= 0) close(platform.drm.fd);
@@ -1207,5 +1379,7 @@ void ClosePlatform(void) {
   close(platform.touch.fd);
   platform.touch.fd = -1;
   platform.drm.needs_modeset = true;
+#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
   platform.gbm.current_fb = platform.gbm.next_fb = 0;
+#endif
 }

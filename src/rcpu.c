@@ -1,9 +1,10 @@
-// rcpu: software rasterizer for the openpilot UI on comma devices, which keeps the GPU free for the driving model.
-// Pixels are premultiplied RGBA8 (DRM ABGR8888), colors are passed in straight alpha.
-// On PLATFORM_COMMA it also scans out through the display's rotator and KMS.
+// rcpu: a software rasterizer for the 2D drawing of raylib's software renderer, rlsw, which it does several times faster.
+// rcpu_rlsw.c hands it what rlsw draws, and it draws what has no fixed function equivalent, like a GPU's frame shaders.
+//
+// Pixels are premultiplied RGBA8, which is DRM's ABGR8888. Colors are packed r | g << 8 | b << 16 | a << 24, straight alpha.
+// Pixel centers are at halves, and a pixel is drawn when its center is inside a shape.
 #include "rcpu.h"
 
-#include <errno.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,7 +16,8 @@
 static struct {
   uint8_t *pixels;
   int width, height, stride;
-  int x0, y0, x1, y1;  // clip
+  int x0, y0, x1, y1;  // the clip
+  float scale, tx, ty;  // the transform
 } T;
 
 void cr_target(uint8_t *pixels, int width, int height, int stride) {
@@ -23,9 +25,8 @@ void cr_target(uint8_t *pixels, int width, int height, int stride) {
   T.width = width;
   T.height = height;
   T.stride = stride;
-  T.x0 = T.y0 = 0;
-  T.x1 = width;
-  T.y1 = height;
+  cr_clip(0, 0, width, height);
+  cr_transform(1.0f, 0.0f, 0.0f);
 }
 
 void cr_clip(int x0, int y0, int x1, int y1) {
@@ -35,591 +36,604 @@ void cr_clip(int x0, int y0, int x1, int y1) {
   T.y1 = CLAMP(y1, T.y0, T.height);
 }
 
-static inline uint32_t *row(int y) { return (uint32_t *)(T.pixels + (size_t)y * T.stride); }
+void cr_transform(float scale, float tx, float ty) {
+  T.scale = scale;
+  T.tx = tx;
+  T.ty = ty;
+}
 
-// scale all four 8-bit channels by a/255
+static inline float to_x(float x) { return x * T.scale + T.tx; }
+static inline float to_y(float y) { return y * T.scale + T.ty; }
+
+static inline uint32_t *row(int y) { return (uint32_t *)(T.pixels + (ptrdiff_t)y * T.stride); }
+
+// have n pixels from p cached before they're drawn. a screen's rows are far apart and mostly out of the cache, which
+// stalls drawing narrow things, like glyphs, row after row
+static inline void prefetch(const uint32_t *p, int n) {
+#if defined(__GNUC__) || defined(__clang__)
+  for (int i = 0; i < n; i += 16) __builtin_prefetch(p + i, 1);  // 16 pixels to a 64 byte cache line
+  __builtin_prefetch(p + n - 1, 1);
+#endif
+}
+
+// the first pixel whose center is at or after a
+static inline int first_pixel(float a) { return (int)ceilf(a - 0.5f); }
+
+// ***** colors *****
+
+static inline uint32_t rgba(uint32_t r, uint32_t g, uint32_t b, uint32_t a) { return r | g << 8 | b << 16 | a << 24; }
+static inline uint32_t alpha(uint32_t c) { return c >> 24; }
+
+// all four channels scaled by a/255, rounded. two channels at a time: red with blue, and green with alpha.
+// x/255 is computed as (x + x/256) / 256
 static inline uint32_t mul(uint32_t c, uint32_t a) {
-  uint32_t rb = (c & 0x00ff00ff) * a + 0x00800080;
-  uint32_t ga = ((c >> 8) & 0x00ff00ff) * a + 0x00800080;
-  rb = ((rb + ((rb >> 8) & 0x00ff00ff)) >> 8) & 0x00ff00ff;
-  ga = (ga + ((ga >> 8) & 0x00ff00ff)) & 0xff00ff00;
-  return rb | ga;
+  uint32_t red_blue = (c & 0x00ff00ff) * a + 0x00800080;
+  uint32_t green_alpha = ((c >> 8) & 0x00ff00ff) * a + 0x00800080;
+  red_blue = ((red_blue + ((red_blue >> 8) & 0x00ff00ff)) >> 8) & 0x00ff00ff;
+  green_alpha = (green_alpha + ((green_alpha >> 8) & 0x00ff00ff)) & 0xff00ff00;
+  return red_blue | green_alpha;
 }
 
-static inline uint32_t premultiply(uint32_t c) { return (mul(c | 0xff000000, c >> 24) & 0x00ffffff) | (c & 0xff000000); }
-static inline uint32_t over(uint32_t dst, uint32_t src) { return src + mul(dst, 255 - (src >> 24)); }
-
+// each channel of a times the same channel of b, out of 255
 static inline uint32_t mul4(uint32_t a, uint32_t b) {
-  uint32_t r = 0;
-  for (int s = 0; s < 32; s += 8) {
-    uint32_t x = ((a >> s) & 255) * ((b >> s) & 255) + 128;
-    r |= ((x + (x >> 8)) >> 8) << s;
+  uint32_t result = 0;
+  for (int shift = 0; shift < 32; shift += 8) {
+    uint32_t product = ((a >> shift) & 255) * ((b >> shift) & 255) + 128;
+    uint32_t channel = (product + (product >> 8)) >> 8;
+    result |= channel << shift;
   }
-  return r;
+  return result;
 }
 
+// straight alpha to premultiplied: the color scaled by alpha, alpha kept
+static inline uint32_t premultiply(uint32_t c) {
+  uint32_t a = alpha(c);
+  uint32_t color = mul(c, a) & 0x00ffffff;
+  return color | a << 24;
+}
+
+// premultiplied src drawn over dst
+static inline uint32_t over(uint32_t dst, uint32_t src) {
+  uint32_t uncovered = 255 - alpha(src);
+  return src + mul(dst, uncovered);
+}
+
+// from a to b by t out of 255
 static inline uint32_t lerp(uint32_t a, uint32_t b, uint32_t t) { return mul(a, 255 - t) + mul(b, t); }
 
-static void span(uint32_t *p, int n, uint32_t c) {
-  if ((c >> 24) == 255) {
-    for (int i = 0; i < n; i++) p[i] = c;
-  } else if (c) {
-    for (int i = 0; i < n; i++) p[i] = over(p[i], c);
+void cr_premultiply(uint32_t *dst, const uint32_t *src, size_t count) {
+  for (size_t i = 0; i < count; i++) dst[i] = premultiply(src[i]);
+}
+
+// n pixels of one premultiplied color
+static void span(uint32_t *dst, int n, uint32_t c) {
+  if (alpha(c) == 255) {
+    for (int i = 0; i < n; i++) dst[i] = c;
+  } else if (c != 0) {
+    for (int i = 0; i < n; i++) dst[i] = over(dst[i], c);
   }
 }
 
-// pixels whose centers are in [a, b)
-static inline int px0(float a) { return (int)ceilf(a - 0.5f); }
+// ***** shapes *****
 
-void cr_clear(uint32_t color) {
-  uint32_t c = premultiply(color);
-  for (int y = 0; y < T.height; y++) {
-    uint32_t *p = row(y);
-    for (int x = 0; x < T.width; x++) p[x] = c;
-  }
+// the fraction of the way from a to b at t, out of 255
+static inline uint32_t fraction(float t, float a, float b) {
+  float f = (t - a) / (b - a) * 255.0f + 0.5f;
+  return (uint32_t)CLAMP(f, 0.0f, 255.0f);
 }
 
-// axis aligned rectangle, corners are bilinearly interpolated
-void cr_rect(float x0, float y0, float x1, float y1, uint32_t tl, uint32_t tr, uint32_t bl, uint32_t br) {
-  int ix0 = MAX(px0(x0), T.x0), ix1 = MIN(px0(x1), T.x1);
-  int iy0 = MAX(px0(y0), T.y0), iy1 = MIN(px0(y1), T.y1);
-  if (ix0 >= ix1 || iy0 >= iy1) return;
-  tl = premultiply(tl); tr = premultiply(tr); bl = premultiply(bl); br = premultiply(br);
-  for (int y = iy0; y < iy1; y++) {
-    uint32_t t = (uint32_t)CLAMP((y + 0.5f - y0) / (y1 - y0) * 255.0f + 0.5f, 0.0f, 255.0f);
-    uint32_t l = lerp(tl, bl, t), r = lerp(tr, br, t);
-    uint32_t *p = row(y);
-    if (l == r) {
-      span(p + ix0, ix1 - ix0, l);
+// like GL, colors are interpolated straight and then premultiplied
+void cr_rect(float x0, float y0, float x1, float y1, uint32_t top_left, uint32_t top_right, uint32_t bottom_left,
+             uint32_t bottom_right) {
+  x0 = to_x(x0);
+  y0 = to_y(y0);
+  x1 = to_x(x1);
+  y1 = to_y(y1);
+  int left = MAX(first_pixel(x0), T.x0), right = MIN(first_pixel(x1), T.x1);
+  int top = MAX(first_pixel(y0), T.y0), bottom = MIN(first_pixel(y1), T.y1);
+  if (left >= right || top >= bottom) return;
+
+  // the fraction of the way across at each column, the same for every row
+  uint32_t across[right - left];
+  if (top_left != top_right || bottom_left != bottom_right) {
+    for (int x = left; x < right; x++) across[x - left] = fraction(x + 0.5f, x0, x1);
+  }
+  for (int y = top; y < bottom; y++) {
+    uint32_t down = fraction(y + 0.5f, y0, y1);
+    uint32_t row_left = lerp(top_left, bottom_left, down), row_right = lerp(top_right, bottom_right, down);
+    uint32_t *dst = row(y) + left;
+    if (row_left == row_right) {
+      span(dst, right - left, premultiply(row_left));
       continue;
     }
-    for (int x = ix0; x < ix1; x++) {
-      uint32_t s = (uint32_t)CLAMP((x + 0.5f - x0) / (x1 - x0) * 255.0f + 0.5f, 0.0f, 255.0f);
-      p[x] = over(p[x], lerp(l, r, s));
-    }
+    for (int i = 0; i < right - left; i++) dst[i] = over(dst[i], premultiply(lerp(row_left, row_right, across[i])));
   }
 }
 
-// signed distance to a rounded box with half size (hw, hh) and corner radius r
-static inline float rbox(float dx, float dy, float hw, float hh, float r) {
-  float qx = fabsf(dx) - hw + r, qy = fabsf(dy) - hh + r;
-  float ox = MAX(qx, 0.0f), oy = MAX(qy, 0.0f);
-  return sqrtf(ox * ox + oy * oy) + MIN(MAX(qx, qy), 0.0f) - r;
-}
+typedef struct {
+  float x, y;
+} point;
 
-// half width of the row of a rounded box where its distance is <= k
-static inline float rbox_extent(float dy, float hw, float hh, float r, float k) {
-  float qy = fabsf(dy) - hh + r, m = k + r;
-  if (qy > m) return -1.0f;
-  return hw - r + (qy > 0 ? sqrtf(m * m - qy * qy) : m);
-}
-
-// filled rounded rectangle, or its outline when thickness > 0. antialiased
-void cr_rounded_rect(float x, float y, float w, float h, float r, float thickness, uint32_t color) {
-  float hw = w / 2, hh = h / 2, cx = x + hw, cy = y + hh;
-  r = CLAMP(r, 0.0f, MIN(hw, hh));
-  uint32_t c = premultiply(color);
-  int iy0 = MAX((int)floorf(y), T.y0), iy1 = MIN((int)ceilf(y + h), T.y1);
-  for (int iy = iy0; iy < iy1; iy++) {
-    float dy = iy + 0.5f - cy;
-    float outer = rbox_extent(dy, hw, hh, r, 0.5f);
-    if (outer < 0) continue;
-    float solid = rbox_extent(dy, hw, hh, r, -0.5f);
-    float inner = thickness > 0 ? rbox_extent(dy, hw, hh, r, 0.5f - thickness) : -1.0f;
-    float hole = thickness > 0 ? rbox_extent(dy, hw, hh, r, -thickness - 0.5f) : -1.0f;
-    // [s0, s1) is fully covered except for [i0, i1), of which [h0, h1) is empty. the rest is antialiased
-    int x0 = MAX((int)floorf(cx - outer), T.x0), x1 = MIN((int)ceilf(cx + outer), T.x1);
-    int s0 = solid < 0 ? x1 : CLAMP(px0(cx - solid), x0, x1), s1 = solid < 0 ? x1 : CLAMP(px0(cx + solid), s0, x1);
-    int i0 = inner < 0 ? s1 : CLAMP(px0(cx - inner), s0, s1), i1 = inner < 0 ? s1 : CLAMP(px0(cx + inner), i0, s1);
-    int h0 = hole < 0 ? i0 : CLAMP(px0(cx - hole), i0, i1), h1 = hole < 0 ? i0 : CLAMP(px0(cx + hole), h0, i1);
-    uint32_t *p = row(iy);
-    span(p + s0, i0 - s0, c);
-    span(p + i1, s1 - i1, c);
-    const int edges[4][2] = {{x0, s0}, {i0, h0}, {h1, i1}, {s1, x1}};
-    for (int e = 0; e < 4; e++) {
-      for (int ix = edges[e][0]; ix < edges[e][1]; ix++) {
-        float d = rbox(ix + 0.5f - cx, dy, hw, hh, r);
-        float a = CLAMP(0.5f - d, 0.0f, 1.0f);
-        if (thickness > 0) a *= CLAMP(d + thickness + 0.5f, 0.0f, 1.0f);
-        if (a > 0) p[ix] = over(p[ix], mul(c, (uint32_t)(a * 255.0f + 0.5f)));
-      }
-    }
-  }
-}
-
-// ring between two radii from angle a0 to a1 (degrees, clockwise from +x), colored from inner to outer radius
-void cr_ring(float cx, float cy, float r0, float r1, float a0, float a1, uint32_t inner, uint32_t outer) {
-  inner = premultiply(inner);
-  outer = premultiply(outer);
-  int full = a1 - a0 >= 360.0f;
-  float start = fmodf(a0, 360.0f);
-  if (start < 0) start += 360.0f;
-  int iy0 = MAX((int)floorf(cy - r1), T.y0), iy1 = MIN((int)ceilf(cy + r1), T.y1);
-  int ix0 = MAX((int)floorf(cx - r1), T.x0), ix1 = MIN((int)ceilf(cx + r1), T.x1);
-  for (int iy = iy0; iy < iy1; iy++) {
-    uint32_t *p = row(iy);
-    float dy = iy + 0.5f - cy;
-    for (int ix = ix0; ix < ix1; ix++) {
-      float dx = ix + 0.5f - cx, d = sqrtf(dx * dx + dy * dy);
-      float a = CLAMP(r1 - d + 0.5f, 0.0f, 1.0f) * (r0 > 0 ? CLAMP(d - r0 + 0.5f, 0.0f, 1.0f) : 1.0f);
-      if (a <= 0) continue;
-      if (!full) {
-        float angle = fmodf(atan2f(dy, dx) * 57.29578f - start + 720.0f, 360.0f);
-        if (angle > a1 - a0) continue;
-      }
-      uint32_t c = inner == outer ? inner : lerp(inner, outer, (uint32_t)CLAMP((d - r0) / (r1 - r0) * 255.0f, 0.0f, 255.0f));
-      p[ix] = over(p[ix], mul(c, (uint32_t)(a * 255.0f + 0.5f)));
-    }
-  }
-}
-
-static void triangle(const float *a, const float *b, const float *c, uint32_t ca, uint32_t cb, uint32_t cc) {
-  float area = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+// a triangle with a color at each corner, interpolated across it straight and then premultiplied, like GL
+static void triangle(point a, point b, point c, uint32_t color_a, uint32_t color_b, uint32_t color_c) {
+  float area = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
   if (fabsf(area) < 1e-6f) return;
-  if (area < 0) {  // make counterclockwise in screen space
-    const float *t = b; b = c; c = t;
-    uint32_t tc = cb; cb = cc; cc = tc;
+  if (area < 0) {  // make it counterclockwise on the screen
+    point p = b;
+    b = c;
+    c = p;
+    uint32_t color = color_b;
+    color_b = color_c;
+    color_c = color;
     area = -area;
   }
-  // barycentric weight of vertex k is (wa[k] * x + wy[k] * y + wc[k]) / area, inside where all are >= 0
-  const float *v[3] = {a, b, c};
-  float wa[3], wy[3], wc[3];
+
+  // the weight of corner k at (x, y) is (wx[k] * x + wy[k] * y + w0[k]) / area, and inside where every weight is >= 0
+  const point corners[3] = {a, b, c};
+  const uint32_t colors[3] = {color_a, color_b, color_c};
+  float wx[3], wy[3], w0[3], inverse_wx[3];
   for (int k = 0; k < 3; k++) {
-    const float *p = v[(k + 1) % 3], *q = v[(k + 2) % 3];
-    wa[k] = p[1] - q[1];
-    wy[k] = q[0] - p[0];
-    wc[k] = -wy[k] * p[1] - wa[k] * p[0];
+    point p = corners[(k + 1) % 3], q = corners[(k + 2) % 3];
+    wx[k] = p.y - q.y;
+    wy[k] = q.x - p.x;
+    w0[k] = -wy[k] * p.y - wx[k] * p.x;
+    inverse_wx[k] = wx[k] != 0 ? 1.0f / wx[k] : 0.0f;
   }
-  // so each channel is cx[s] * x + cy[s] * y + cz[s]
-  uint32_t col[3] = {ca, cb, cc};
-  float cx[4] = {0}, cy[4] = {0}, cz[4] = {0.5f, 0.5f, 0.5f, 0.5f};  // + 0.5 rounds
-  for (int s = 0; s < 4; s++) {
+  // and so channel s at (x, y) is cx[s] * x + cy[s] * y + c0[s]
+  bool one_color = color_a == color_b && color_b == color_c;
+  float cx[4] = {0}, cy[4] = {0}, c0[4] = {0.5f, 0.5f, 0.5f, 0.5f};  // the halves round
+  for (int s = 0; s < 4 && !one_color; s++) {
     for (int k = 0; k < 3; k++) {
-      float cv = ((col[k] >> (8 * s)) & 255) / area;
-      cx[s] += wa[k] * cv;
-      cy[s] += wy[k] * cv;
-      cz[s] += wc[k] * cv;
+      float channel = ((colors[k] >> (8 * s)) & 255) / area;
+      cx[s] += wx[k] * channel;
+      cy[s] += wy[k] * channel;
+      c0[s] += w0[k] * channel;
     }
   }
-  int flat = ca == cb && cb == cc;
-  int iy0 = MAX(px0(MIN(MIN(a[1], b[1]), c[1])), T.y0), iy1 = MIN(px0(MAX(MAX(a[1], b[1]), c[1])) + 1, T.y1);
-  for (int iy = iy0; iy < iy1; iy++) {
-    float py = iy + 0.5f, lo = T.x0, hi = T.x1;
+  uint32_t premultiplied = premultiply(color_a);
+
+  int top = MAX(first_pixel(fminf(fminf(a.y, b.y), c.y)), T.y0);
+  int bottom = MIN(first_pixel(fmaxf(fmaxf(a.y, b.y), c.y)) + 1, T.y1);
+  for (int y = top; y < bottom; y++) {
+    // the row's span is where every weight is >= 0
+    float center_y = y + 0.5f, left = T.x0, right = T.x1;
     for (int k = 0; k < 3; k++) {
-      float wb = wy[k] * py + wc[k];
-      if (wa[k] > 0) lo = MAX(lo, -wb / wa[k]);
-      else if (wa[k] < 0) hi = MIN(hi, -wb / wa[k]);
-      else if (wb < 0 || (wb == 0 && wy[k] < 0)) hi = lo;  // centers on a bottom edge belong to the triangle below
+      float weight_at_x0 = wy[k] * center_y + w0[k];
+      if (wx[k] > 0) {
+        left = fmaxf(left, -weight_at_x0 * inverse_wx[k]);
+      } else if (wx[k] < 0) {
+        right = fminf(right, -weight_at_x0 * inverse_wx[k]);
+      } else if (weight_at_x0 < 0 || (weight_at_x0 == 0 && wy[k] < 0)) {
+        right = left;  // a center on a bottom edge belongs to the triangle below it
+      }
     }
-    int x0 = MAX(px0(lo), T.x0), x1 = MIN(px0(hi), T.x1);
+    int x0 = MAX(first_pixel(left), T.x0), x1 = MIN(first_pixel(right), T.x1);
     if (x0 >= x1) continue;
-    uint32_t *p = row(iy);
-    if (flat) {
-      span(p + x0, x1 - x0, ca);
+
+    uint32_t *dst = row(y);
+    if (one_color) {
+      span(dst + x0, x1 - x0, premultiplied);
       continue;
     }
-    float ch[4];
-    for (int s = 0; s < 4; s++) ch[s] = cx[s] * (x0 + 0.5f) + cy[s] * py + cz[s];
+    float channels[4];
+    for (int s = 0; s < 4; s++) channels[s] = cx[s] * (x0 + 0.5f) + cy[s] * center_y + c0[s];
     for (int x = x0; x < x1; x++) {
-      float k = x - x0;
-      uint32_t px = 0;
-      for (int s = 0; s < 4; s++) px |= (uint32_t)CLAMP(ch[s] + cx[s] * k, 0.0f, 255.0f) << (8 * s);
-      p[x] = over(p[x], px);
+      uint32_t c = 0;
+      for (int s = 0; s < 4; s++) {
+        float channel = channels[s] + cx[s] * (x - x0);
+        c |= (uint32_t)CLAMP(channel, 0.0f, 255.0f) << (8 * s);
+      }
+      dst[x] = over(dst[x], premultiply(c));
     }
   }
 }
 
-// triangles from n points: mode 0 = list, 1 = strip, 2 = fan. one color per point, or a single color
-void cr_triangles(const float *xy, int n, const uint32_t *colors, int ncolors, int mode) {
-  if (n < 3 || ncolors < 1) return;
-  uint32_t c[n];
-  for (int i = 0; i < n; i++) c[i] = premultiply(colors[ncolors == n ? i : 0]);
-  for (int i = 2; i < n; i += mode == 0 ? 3 : 1) {
-    int i0 = mode == 2 ? 0 : i - 2, i1 = i - 1;
-    triangle(&xy[2 * i0], &xy[2 * i1], &xy[2 * i], c[i0], c[i1], c[i]);
+void cr_triangles(const float *xy, int count, const uint32_t *colors, int color_count, int mode) {
+  if (count < 3 || (color_count != 1 && color_count != count)) return;
+  point points[count];
+  for (int i = 0; i < count; i++) points[i] = (point){to_x(xy[2 * i]), to_y(xy[2 * i + 1])};
+  int step = mode == CR_TRIANGLE_LIST ? 3 : 1;
+  for (int i = 2; i < count; i += step) {
+    int first = mode == CR_TRIANGLE_FAN ? 0 : i - 2;
+    uint32_t color_first = colors[color_count == 1 ? 0 : first];
+    uint32_t color_before = colors[color_count == 1 ? 0 : i - 1], color_last = colors[color_count == 1 ? 0 : i];
+    triangle(points[first], points[i - 1], points[i], color_first, color_before, color_last);
   }
 }
 
-// texel at (x, y), or the bilinear mix of (xa, ya) to (xb, yb) with weights wx, wy out of 256, times the tint
-static inline uint32_t texel(const uint8_t *src, int sstride, int a8, int xa, int xb, int ya, int yb, uint32_t wx, uint32_t wy,
-                             uint32_t tint) {
-  const uint8_t *ra = src + (size_t)ya * sstride, *rb = src + (size_t)yb * sstride;
+// ***** polygons *****
+
+// a polygon's edge, from its top to its bottom
+typedef struct {
+  float x, y, dx_dy;  // its top, and its slope
+  int first_row, end_row;  // the rows whose centers it crosses
+  int winding;  // 1 going down, -1 going up
+} edge;
+
+typedef struct {
+  float x;
+  int winding;
+} crossing;
+
+static int by_first_row(const void *a, const void *b) {
+  return ((const edge *)a)->first_row - ((const edge *)b)->first_row;
+}
+
+// a row of the polygon at t = t_x * x + t_row from the ramp of colors, n of them premultiplied
+static void ramp_span(uint32_t *dst, int x0, int x1, const uint32_t *ramp, int n, float t_x, float t_row) {
+  if (n == 1 || t_x == 0) {
+    float t = CLAMP(t_row + t_x * (x0 + 0.5f), 0.0f, 1.0f);
+    span(dst + x0, x1 - x0, ramp[(int)(t * (n - 1) + 0.5f)]);
+    return;
+  }
+  for (int x = x0; x < x1; x++) {
+    float t = CLAMP(t_row + t_x * (x + 0.5f), 0.0f, 1.0f);
+    dst[x] = over(dst[x], ramp[(int)(t * (n - 1) + 0.5f)]);
+  }
+}
+
+void cr_polygon(const float *xy, int count, const uint32_t *colors, int color_count, float tx, float ty, float t0) {
+  if (count < 3 || color_count < 1) return;
+  uint32_t ramp[color_count];
+  cr_premultiply(ramp, colors, (size_t)color_count);
+  // t at the screen's pixels, before the transform
+  float t_x = tx / T.scale, t_y = ty / T.scale, t_origin = t0 - (tx * T.tx + ty * T.ty) / T.scale;
+
+  edge edges[count];
+  int edge_count = 0, top = T.y1, bottom = T.y0;
+  for (int i = 0; i < count; i++) {
+    int next = (i + 1) % count;
+    float x = to_x(xy[2 * i]), y = to_y(xy[2 * i + 1]), next_x = to_x(xy[2 * next]), next_y = to_y(xy[2 * next + 1]);
+    if (y == next_y) continue;
+    bool down = next_y > y;
+    float top_x = down ? x : next_x, top_y = down ? y : next_y, bottom_y = down ? next_y : y;
+    edge e = {top_x, top_y, (next_x - x) / (next_y - y), MAX(first_pixel(top_y), T.y0), MIN(first_pixel(bottom_y), T.y1),
+              down ? 1 : -1};
+    if (e.first_row >= e.end_row) continue;
+    top = MIN(top, e.first_row);
+    bottom = MAX(bottom, e.end_row);
+    edges[edge_count++] = e;
+  }
+  if (edge_count == 0) return;
+  qsort(edges, (size_t)edge_count, sizeof(edge), by_first_row);
+
+  // row by row, the edges crossing it, sorted along it. pixels are drawn between crossings where they wind around
+  int active[edge_count], active_count = 0, next_edge = 0;
+  crossing crossings[edge_count];
+  for (int y = top; y < bottom; y++) {
+    int still_active = 0;
+    for (int i = 0; i < active_count; i++) {
+      if (edges[active[i]].end_row > y) active[still_active++] = active[i];
+    }
+    active_count = still_active;
+    while (next_edge < edge_count && edges[next_edge].first_row == y) active[active_count++] = next_edge++;
+
+    float center_y = y + 0.5f;
+    for (int i = 0; i < active_count; i++) {
+      const edge *e = &edges[active[i]];
+      crossing c = {e->x + (center_y - e->y) * e->dx_dy, e->winding};
+      int j = i;
+      for (; j > 0 && crossings[j - 1].x > c.x; j--) crossings[j] = crossings[j - 1];
+      crossings[j] = c;
+    }
+    uint32_t *dst = row(y);
+    int winding = 0;
+    for (int i = 0; i + 1 < active_count; i++) {
+      winding += crossings[i].winding;
+      int x0 = MAX(first_pixel(crossings[i].x), T.x0), x1 = MIN(first_pixel(crossings[i + 1].x), T.x1);
+      if (winding != 0 && x0 < x1) ramp_span(dst, x0, x1, ramp, color_count, t_x, t_origin + t_y * center_y);
+    }
+  }
+}
+
+// ***** textures *****
+
+// a texel, premultiplied: an RGBA8 pixel, or white at the alpha of an alpha mask
+static inline uint32_t texel_at(const uint8_t *row_pixels, bool a8, int x) {
   if (a8) {
-    uint32_t a = ra[xa];
-    if (wx | wy) {
-      uint32_t top = ra[xa] * (256 - wx) + ra[xb] * wx, bot = rb[xa] * (256 - wx) + rb[xb] * wx;
-      a = (top * (256 - wy) + bot * wy) >> 16;
+    uint32_t a = row_pixels[x];
+    return rgba(a, a, a, a);
+  }
+  return ((const uint32_t *)row_pixels)[x];
+}
+
+// sampling along one axis: the two texels to mix, and the weight of the second out of 256
+typedef struct {
+  int first, second;
+  uint32_t weight;
+} taps;
+
+// the texel coordinate u, within [lo, hi) of a texture n texels long, to its taps. false outside
+static inline bool axis_taps(float u, float lo, float hi, int n, bool bilinear, taps *out) {
+  if (u < lo || u >= hi) return false;
+  if (bilinear) {
+    float left = u - 0.5f;  // texel centers are at halves
+    int i = (int)floorf(left);
+    out->weight = (uint32_t)((left - i) * 256.0f);
+    out->first = CLAMP(i, 0, n - 1);
+    out->second = CLAMP(i + 1, 0, n - 1);
+  } else {
+    out->first = out->second = CLAMP((int)u, 0, n - 1);
+    out->weight = 0;
+  }
+  return true;
+}
+
+// the source sampled at taps x and y, times the tint
+static inline uint32_t sample(const uint8_t *src, int stride, bool a8, taps x, taps y, uint32_t tint) {
+  const uint8_t *top = src + (size_t)y.first * stride;
+  const uint8_t *bottom = src + (size_t)y.second * stride;
+  bool filtered = x.weight != 0 || y.weight != 0;
+  if (a8) {
+    uint32_t a = top[x.first];
+    if (filtered) {
+      uint32_t top_a = top[x.first] * (256 - x.weight) + top[x.second] * x.weight;
+      uint32_t bottom_a = bottom[x.first] * (256 - x.weight) + bottom[x.second] * x.weight;
+      a = (top_a * (256 - y.weight) + bottom_a * y.weight) >> 16;
     }
     return mul(tint, a);
   }
-  uint32_t c = *(const uint32_t *)(ra + xa * 4);
-  if (wx | wy) {
-    uint32_t ta = lerp(c, *(const uint32_t *)(ra + xb * 4), wx * 255 >> 8);
-    uint32_t tb = lerp(*(const uint32_t *)(rb + xa * 4), *(const uint32_t *)(rb + xb * 4), wx * 255 >> 8);
-    c = lerp(ta, tb, wy * 255 >> 8);
+  uint32_t c = texel_at(top, false, x.first);
+  if (filtered) {
+    uint32_t wx = x.weight * 255 >> 8, wy = y.weight * 255 >> 8;
+    uint32_t top_c = lerp(c, texel_at(top, false, x.second), wx);
+    uint32_t bottom_c = lerp(texel_at(bottom, false, x.first), texel_at(bottom, false, x.second), wx);
+    c = lerp(top_c, bottom_c, wy);
   }
   return tint == 0xffffffff ? c : mul4(c, tint);
 }
 
-// texel coordinate u in [lo, hi) of a texture n wide to the two texels and weight sampling it
-static inline int taps(float u, float lo, float hi, int n, int bilinear, int *a, int *b, uint32_t *w) {
-  if (u < lo || u >= hi) return 0;
-  if (bilinear) {
-    float f = u - 0.5f;
-    int i = (int)floorf(f);
-    *w = (uint32_t)((f - i) * 256.0f);
-    *a = CLAMP(i, 0, n - 1);
-    *b = CLAMP(i + 1, 0, n - 1);
-  } else {
-    *a = *b = CLAMP((int)u, 0, n - 1);
-    *w = 0;
-  }
-  return 1;
-}
-
-// raylib's DrawTexturePro: source rect of src drawn into dest rect rotated around origin.
-// src is premultiplied RGBA, or an alpha mask when a8. negative source size flips
-void cr_blit(const uint8_t *src, int sw, int sh, int sstride, int a8, float sx, float sy, float src_w, float src_h,
-             float dx, float dy, float dw, float dh, float ox, float oy, float rotation, uint32_t tint, int bilinear) {
-  if (dw <= 0 || dh <= 0 || src_w == 0 || src_h == 0 || sw <= 0 || sh <= 0) return;
-  uint32_t t = premultiply(tint);
-  float cs = cosf(rotation * 0.01745329f), sn = sinf(rotation * 0.01745329f);
-  // dest corners
-  float xs[4], ys[4];
-  for (int i = 0; i < 4; i++) {
-    float lx = (i & 1 ? dw : 0) - ox, ly = (i & 2 ? dh : 0) - oy;
-    xs[i] = dx + lx * cs - ly * sn;
-    ys[i] = dy + lx * sn + ly * cs;
-  }
-  int ix0 = MAX(px0(MIN(MIN(xs[0], xs[1]), MIN(xs[2], xs[3]))), T.x0);
-  int ix1 = MIN(px0(MAX(MAX(xs[0], xs[1]), MAX(xs[2], xs[3]))), T.x1);
-  int iy0 = MAX(px0(MIN(MIN(ys[0], ys[1]), MIN(ys[2], ys[3]))), T.y0);
-  int iy1 = MIN(px0(MAX(MAX(ys[0], ys[1]), MAX(ys[2], ys[3]))), T.y1);
-  if (ix0 >= ix1 || iy0 >= iy1) return;
-  // screen -> source texel: u = bu + x*u0x + y*u0y
-  float su = src_w / dw, sv = src_h / dh;
-  float u0x = cs * su, u0y = sn * su, v0x = -sn * sv, v0y = cs * sv;
-  float bu = (src_w < 0 ? sx - src_w : sx) + ox * su, bv = (src_h < 0 ? sy - src_h : sy) + oy * sv;
-  float hu = sx + fabsf(src_w), hv = sy + fabsf(src_h);
-  int xa, xb, ya, yb;
-  uint32_t wx, wy;
-  if (rotation == 0) {  // texel columns and rows are separable, and u increases along the row
-    int n = 0, cxa[ix1 - ix0], cxb[ix1 - ix0];
-    uint32_t cwx[ix1 - ix0], buf[ix1 - ix0];
-    for (int ix = ix0; ix < ix1; ix++) {
-      if (taps(bu + (ix + 0.5f - dx) * u0x, sx, hu, sw, bilinear, &cxa[n], &cxb[n], &cwx[n])) {
-        if (n == 0) ix0 = ix;
-        n++;
-      } else if (n) {
-        break;
+// n texels of a source row drawn one to one over dst
+static void blit_row_unscaled(uint32_t *restrict dst, const uint8_t *restrict src_row, bool a8, int n, uint32_t tint) {
+  if (a8) {
+    // glyphs are mostly clear, or covered where they're drawn in an opaque color
+    bool opaque = alpha(tint) == 255;
+    for (int i = 0; i < n; i++) {
+      if (src_row[i] == 255 && opaque) {
+        dst[i] = tint;
+      } else if (src_row[i] != 0) {
+        dst[i] = over(dst[i], mul(tint, src_row[i]));
       }
     }
-    int unscaled = !bilinear;
-    for (int i = 1; i < n && unscaled; i++) unscaled = cxa[i] == cxa[0] + i;
-    for (int iy = iy0; iy < iy1 && n; iy++) {
-      if (!taps(bv + (iy + 0.5f - dy) * v0y, sy, hv, sh, bilinear, &ya, &yb, &wy)) continue;
-      const uint8_t *s = src + (size_t)ya * sstride;
-      uint32_t *p = row(iy) + ix0;
-      if (unscaled && a8) {
-        for (int i = 0; i < n; i++) p[i] = over(p[i], mul(t, s[cxa[0] + i]));
-      } else if (unscaled && t == 0xffffffff) {
-        for (int i = 0; i < n; i++) p[i] = over(p[i], ((const uint32_t *)s)[cxa[0] + i]);
-      } else {
-        for (int i = 0; i < n; i++) buf[i] = texel(src, sstride, a8, cxa[i], cxb[i], ya, yb, cwx[i], wy, t);
-        for (int i = 0; i < n; i++) p[i] = over(p[i], buf[i]);
+  } else if (tint == 0xffffffff) {
+    // icons and overlays are mostly clear or opaque
+    const uint32_t *texels = (const uint32_t *)src_row;
+    for (int i = 0; i < n; i++) {
+      if (alpha(texels[i]) == 255) {
+        dst[i] = texels[i];
+      } else if (texels[i] != 0) {
+        dst[i] = over(dst[i], texels[i]);
+      }
+    }
+  } else {
+    const uint32_t *texels = (const uint32_t *)src_row;
+    for (int i = 0; i < n; i++) dst[i] = over(dst[i], mul4(texels[i], tint));
+  }
+}
+
+// a row of an alpha mask, its columns sampled at their taps between the rows top and bottom, over dst
+static void blit_row_scaled_a8(uint32_t *restrict dst, const uint8_t *top, const uint8_t *bottom, const taps *columns, int n,
+                               uint32_t bottom_weight, uint32_t tint) {
+  for (int i = 0; i < n; i++) {
+    taps x = columns[i];
+    uint32_t top_left = top[x.first], top_right = top[x.second], bottom_left = bottom[x.first], bottom_right = bottom[x.second];
+    // glyphs are mostly clear
+    if ((top_left | top_right | bottom_left | bottom_right) == 0) continue;
+    uint32_t top_a = top_left * (256 - x.weight) + top_right * x.weight;
+    uint32_t bottom_a = bottom_left * (256 - x.weight) + bottom_right * x.weight;
+    uint32_t a = (top_a * (256 - bottom_weight) + bottom_a * bottom_weight) >> 16;
+    if (a != 0) dst[i] = over(dst[i], mul(tint, a));
+  }
+}
+
+void cr_blit(const uint8_t *src, int src_width, int src_height, int src_stride, bool a8, float sx, float sy, float sw,
+             float sh, float dx, float dy, float dw, float dh, float ox, float oy, float rotation, uint32_t tint, bool bilinear) {
+  dx = to_x(dx);
+  dy = to_y(dy);
+  dw *= T.scale;
+  dh *= T.scale;
+  ox *= T.scale;
+  oy *= T.scale;
+  if (dw <= 0 || dh <= 0 || sw == 0 || sh == 0 || src_width <= 0 || src_height <= 0) return;
+  tint = premultiply(tint);
+  float cos_r = cosf(rotation * 0.01745329f), sin_r = sinf(rotation * 0.01745329f);
+
+  // the pixels the rotated destination covers, clipped
+  float left = INFINITY, right = -INFINITY, top = INFINITY, bottom = -INFINITY;
+  for (int corner = 0; corner < 4; corner++) {
+    float local_x = (corner & 1 ? dw : 0) - ox, local_y = (corner & 2 ? dh : 0) - oy;
+    float x = dx + local_x * cos_r - local_y * sin_r, y = dy + local_x * sin_r + local_y * cos_r;
+    left = fminf(left, x);
+    right = fmaxf(right, x);
+    top = fminf(top, y);
+    bottom = fmaxf(bottom, y);
+  }
+  int x0 = MAX(first_pixel(left), T.x0), x1 = MIN(first_pixel(right), T.x1);
+  int y0 = MAX(first_pixel(top), T.y0), y1 = MIN(first_pixel(bottom), T.y1);
+  if (x0 >= x1 || y0 >= y1) return;
+
+  // a pixel at (x, y) from the destination's top left samples the source at u = u_base + x * u_dx + y * u_dy, and v alike
+  float u_scale = sw / dw, v_scale = sh / dh;
+  float u_dx = cos_r * u_scale, u_dy = sin_r * u_scale;
+  float v_dx = -sin_r * v_scale, v_dy = cos_r * v_scale;
+  float u_base = (sw < 0 ? sx - sw : sx) + ox * u_scale;
+  float v_base = (sh < 0 ? sy - sh : sy) + oy * v_scale;
+  float u_end = sx + fabsf(sw), v_end = sy + fabsf(sh);
+
+  if (rotation != 0) {
+    for (int y = y0; y < y1; y++) {
+      uint32_t *dst = row(y);
+      float py = y + 0.5f - dy;
+      for (int x = x0; x < x1; x++) {
+        float px = x + 0.5f - dx;
+        taps tx, ty;
+        if (axis_taps(u_base + px * u_dx + py * u_dy, sx, u_end, src_width, bilinear, &tx) &&
+            axis_taps(v_base + px * v_dx + py * v_dy, sy, v_end, src_height, bilinear, &ty)) {
+          dst[x] = over(dst[x], sample(src, src_stride, a8, tx, ty, tint));
+        }
       }
     }
     return;
   }
-  for (int iy = iy0; iy < iy1; iy++) {
-    uint32_t *p = row(iy);
-    float py = iy + 0.5f - dy;
-    for (int ix = ix0; ix < ix1; ix++) {
-      float px = ix + 0.5f - dx;
-      if (taps(bu + px * u0x + py * u0y, sx, hu, sw, bilinear, &xa, &xb, &wx) &&
-          taps(bv + px * v0x + py * v0y, sy, hv, sh, bilinear, &ya, &yb, &wy)) {
-        p[ix] = over(p[ix], texel(src, sstride, a8, xa, xb, ya, yb, wx, wy, t));
-      }
+
+  // unrotated, u depends only on x and v only on y: the taps of each column are found once
+  int n = 0;
+  taps columns[x1 - x0];
+  for (int x = x0; x < x1; x++) {
+    if (axis_taps(u_base + (x + 0.5f - dx) * u_dx, sx, u_end, src_width, bilinear, &columns[n])) {
+      if (n == 0) x0 = x;
+      n++;
+    } else if (n > 0) {
+      break;
+    }
+  }
+  if (n == 0) return;
+  bool unscaled = !bilinear;
+  for (int i = 1; i < n && unscaled; i++) unscaled = columns[i].first == columns[0].first + i;
+
+  uint32_t samples[n];
+  for (int y = y0; y < y1; y++) {
+    if (y + 2 < y1) prefetch(row(y + 2) + x0, n);
+    taps ty;
+    if (!axis_taps(v_base + (y + 0.5f - dy) * v_dy, sy, v_end, src_height, bilinear, &ty)) continue;
+    uint32_t *dst = row(y) + x0;
+    const uint8_t *top = src + (size_t)ty.first * src_stride, *bottom = src + (size_t)ty.second * src_stride;
+    if (unscaled) {
+      blit_row_unscaled(dst, top + (size_t)columns[0].first * (a8 ? 1 : 4), a8, n, tint);
+    } else if (a8) {
+      blit_row_scaled_a8(dst, top, bottom, columns, n, ty.weight, tint);
+    } else {
+      for (int i = 0; i < n; i++) samples[i] = sample(src, src_stride, a8, columns[i], ty, tint);
+      for (int i = 0; i < n; i++) dst[i] = over(dst[i], samples[i]);
     }
   }
 }
 
-// NV12 frame drawn opaque into dest rect, sampled at nearest and converted like the GPU's NV12 import (limited range BT.601),
-// then mixed with its luma by saturation/256 and each channel mapped through curve, as the frame shaders do. like on the GPU,
-// channels can be outside [0, 255] until the curve, which has 1280 entries for -512 to 767
-// the result is reused until new_frame or the parameters change
+// ***** NV12 *****
+
+// what a conversion is made from, compared whole to reuse it
+typedef struct {
+  const uint8_t *y_plane, *uv_plane;
+  float dx, dy, dw, dh;
+  int x0, x1, y0, y1, width, height, stride, saturation;
+  bool flip_x;
+  uint8_t curve[1280];
+} nv12_params;
+
+// the last conversion. a frame drawn more than once, like a 20 Hz camera on a 60 Hz screen, is kept to be copied again
 static struct {
-  uint32_t *px;
-  size_t cap;
-  float params[4];
-  const void *ptrs[2];
-  int ints[8];
+  nv12_params params;
+  bool redrawn;  // whether the last conversion was drawn again
+  bool kept;     // whether pixels hold it
+  uint32_t *pixels;
+  size_t capacity;
 } NV;
 
 // frame row pixels lo to hi, lo even. a chroma pair is shared by two luma pixels.
 // mixing with the luma is scaling the chroma, as the conversion keeps the luma. with saturation <= 256, channels are -277 to 536
-static void nv12_row(uint32_t *restrict p, const uint8_t *restrict yr, const uint8_t *restrict uvr, int lo, int hi,
+static void nv12_row(uint32_t *restrict dst, const uint8_t *restrict luma, const uint8_t *restrict chroma, int lo, int hi,
                      const uint8_t *restrict curve, int saturation) {
   for (int x = lo; x <= hi; x += 2) {
-    int u = (uvr[x] - 128) * saturation, v = (uvr[x + 1] - 128) * saturation;
-    int dr = (409 * v) >> 16, dg = (100 * u + 208 * v) >> 16, db = (516 * u) >> 16;
+    int u = (chroma[x] - 128) * saturation, v = (chroma[x + 1] - 128) * saturation;
+    int red = (409 * v) >> 16, green = -((100 * u + 208 * v) >> 16), blue = (516 * u) >> 16;
     for (int k = 0; k < 2; k++) {
-      int l = ((yr[x + k] - 16) * 298) >> 8;
-      const uint8_t *c = curve + 512 + l;
-      p[x + k] = 0xff000000 | (uint32_t)c[db] << 16 | (uint32_t)c[-dg] << 8 | c[dr];
+      int l = ((luma[x + k] - 16) * 298) >> 8;
+      const uint8_t *mapped = curve + 512 + l;
+      dst[x + k] = rgba(mapped[red], mapped[green], mapped[blue], 255);
     }
   }
 }
 
-void cr_nv12(const uint8_t *y_plane, const uint8_t *uv_plane, int stride, int fw, int fh, float dx, float dy, float dw, float dh,
-             int flip_x, const uint8_t *curve, int saturation, int new_frame) {
-  int ix0 = MAX(px0(dx), T.x0), ix1 = MIN(px0(dx + dw), T.x1);
-  int iy0 = MAX(px0(dy), T.y0), iy1 = MIN(px0(dy + dh), T.y1);
-  if (ix0 >= ix1 || iy0 >= iy1) return;
-  int n = ix1 - ix0;
-  float params[4] = {dx, dy, dw, dh};
-  const void *ptrs[2] = {y_plane, curve};
-  saturation = CLAMP(saturation, 0, 256);
-  int ints[8] = {ix0, ix1, iy0, iy1, fw, fh, flip_x, saturation};
-  int convert = new_frame || memcmp(params, NV.params, sizeof(params)) || memcmp(ptrs, NV.ptrs, sizeof(ptrs)) ||
-                memcmp(ints, NV.ints, sizeof(ints));
-  if (convert) {
-    size_t size = (size_t)n * (iy1 - iy0);
-    if (size > NV.cap) {
-      free(NV.px);
-      NV.px = malloc(size * 4);
-      NV.cap = NV.px ? size : 0;
-      if (!NV.px) return;
-    }
-    memcpy(NV.params, params, sizeof(params));
-    memcpy(NV.ptrs, ptrs, sizeof(ptrs));
-    memcpy(NV.ints, ints, sizeof(ints));
+// n pixels of a frame row, each converted at its column, for fewer pixels than the row has
+static void nv12_columns(uint32_t *restrict dst, const uint8_t *restrict luma, const uint8_t *restrict chroma,
+                         const int *columns, int n, const uint8_t *restrict curve, int saturation) {
+  for (int i = 0; i < n; i++) {
+    int x = columns[i], pair = x & ~1;
+    int u = (chroma[pair] - 128) * saturation, v = (chroma[pair + 1] - 128) * saturation;
+    int red = (409 * v) >> 16, green = -((100 * u + 208 * v) >> 16), blue = (516 * u) >> 16;
+    int l = ((luma[x] - 16) * 298) >> 8;
+    const uint8_t *mapped = curve + 512 + l;
+    dst[i] = rgba(mapped[red], mapped[green], mapped[blue], 255);
   }
-  int cols[n];
-  for (int i = 0; i < n && convert; i++) {
-    int fx = CLAMP((int)((ix0 + i + 0.5f - dx) * fw / dw), 0, fw - 1);
-    cols[i] = flip_x ? fw - 1 - fx : fx;
+}
+
+static bool reserve_nv12_pixels(size_t count) {
+  if (count <= NV.capacity) return true;
+  free(NV.pixels);
+  NV.pixels = malloc(count * 4);
+  NV.capacity = NV.pixels ? count : 0;
+  return NV.pixels != NULL;
+}
+
+void cr_nv12(const uint8_t *y_plane, const uint8_t *uv_plane, int stride, int width, int height, float dx, float dy, float dw,
+             float dh, bool flip_x, const uint8_t *curve, int saturation, bool new_frame) {
+  if (new_frame) NV.kept = false;
+  dx = to_x(dx);
+  dy = to_y(dy);
+  dw *= T.scale;
+  dh *= T.scale;
+  int x0 = MAX(first_pixel(dx), T.x0), x1 = MIN(first_pixel(dx + dw), T.x1);
+  int y0 = MAX(first_pixel(dy), T.y0), y1 = MIN(first_pixel(dy + dh), T.y1);
+  if (x0 >= x1 || y0 >= y1) return;
+  const int n = x1 - x0;
+
+  nv12_params params;
+  memset(&params, 0, sizeof(params));  // and so its padding
+  params.y_plane = y_plane;
+  params.uv_plane = uv_plane;
+  params.dx = dx;
+  params.dy = dy;
+  params.dw = dw;
+  params.dh = dh;
+  params.x0 = x0;
+  params.x1 = x1;
+  params.y0 = y0;
+  params.y1 = y1;
+  params.width = width;
+  params.height = height;
+  params.stride = stride;
+  params.saturation = CLAMP(saturation, 0, 256);
+  params.flip_x = flip_x;
+  memcpy(params.curve, curve, sizeof(params.curve));
+
+  bool same = !new_frame && memcmp(&params, &NV.params, sizeof(params)) == 0;
+  if (same && NV.kept) {
+    for (int y = y0; y < y1; y++) memcpy(row(y) + x0, NV.pixels + (size_t)(y - y0) * n, (size_t)n * 4);
+    NV.redrawn = true;
+    return;
   }
-  int lo = convert ? MIN(cols[0], cols[n - 1]) & ~1 : 0, hi = convert ? MAX(cols[0], cols[n - 1]) : 0;  // sampled frame columns
-  uint32_t src[hi + 2];  // in whole chroma pairs
-  for (int iy = iy0, prev = -1; iy < iy1; iy++) {
-    uint32_t *p = NV.px + (size_t)(iy - iy0) * n;
-    if (convert) {
-      int fy = CLAMP((int)((iy + 0.5f - dy) * fh / dh), 0, fh - 1);
-      if (fy == prev) {  // upscaled, same frame row as the last one
-        memcpy(p, p - n, (size_t)n * 4);
+  bool keep = (same || NV.redrawn) && reserve_nv12_pixels((size_t)n * (y1 - y0));
+  NV.redrawn = same;
+  NV.params = params;
+
+  // converted straight onto the screen, at the frame column each pixel samples, nearest
+  int columns[n];
+  for (int i = 0; i < n; i++) {
+    int column = CLAMP((int)((x0 + i + 0.5f - dx) * width / dw), 0, width - 1);
+    columns[i] = flip_x ? width - 1 - column : column;
+  }
+  // when there are fewer pixels than frame columns between the first and last sampled, each pixel is converted. else the
+  // frame row is, in whole chroma pairs, and sampled
+  int lo = MIN(columns[0], columns[n - 1]) & ~1, hi = MAX(columns[0], columns[n - 1]);
+  bool downscaled = n < hi - lo;
+  uint32_t converted[downscaled ? 1 : hi + 2];
+  int last_frame_row = -1;
+  for (int y = y0; y < y1; y++) {
+    uint32_t *dst = row(y) + x0;
+    int frame_row = CLAMP((int)((y + 0.5f - dy) * height / dh), 0, height - 1);
+    if (frame_row == last_frame_row) {  // upscaled, the same frame row again
+      memcpy(dst, row(y - 1) + x0, (size_t)n * 4);
+    } else {
+      const uint8_t *luma = y_plane + (size_t)frame_row * stride, *chroma = uv_plane + (size_t)(frame_row / 2) * stride;
+      if (downscaled) {
+        nv12_columns(dst, luma, chroma, columns, n, curve, params.saturation);
       } else {
-        // converted at the frame's resolution, then scaled
-        nv12_row(src, y_plane + (size_t)fy * stride, uv_plane + (size_t)(fy / 2) * stride, lo, hi, curve, saturation);
-        for (int i = 0; i < n; i++) p[i] = src[cols[i]];
+        nv12_row(converted, luma, chroma, lo, hi, curve, params.saturation);
+        for (int i = 0; i < n; i++) dst[i] = converted[columns[i]];
       }
-      prev = fy;
+      last_frame_row = frame_row;
     }
-    memcpy(row(iy) + ix0, p, (size_t)n * 4);
+    if (keep) memcpy(NV.pixels + (size_t)(y - y0) * n, dst, (size_t)n * 4);
   }
+  NV.kept = keep;
 }
-
-// ***** KMS output *****
-// the display's rotator turns the landscape target into one of two portrait panel buffers, which is then flipped to
-
-#if defined(PLATFORM_COMMA)
-#include <fcntl.h>
-#include <sys/ioctl.h>
-#include <sys/mman.h>
-#include <unistd.h>
-#include <drm/drm.h>
-#include <drm/drm_fourcc.h>
-#include <drm/drm_mode.h>
-#include <linux/videodev2.h>
-
-// the msm ION interface of the 4.9 kernel (linux/ion.h, linux/msm_ion.h)
-typedef int ion_user_handle_t;
-struct ion_allocation_data { size_t len, align; unsigned int heap_id_mask, flags; ion_user_handle_t handle; };
-struct ion_fd_data { ion_user_handle_t handle; int fd; };
-struct ion_handle_data { ion_user_handle_t handle; };
-struct ion_custom_data { unsigned int cmd; unsigned long arg; };
-struct ion_flush_data { ion_user_handle_t handle; int fd; void *vaddr; unsigned int offset, length; };
-#define ION_IOMMU_HEAP_ID 25
-#define ION_FLAG_CACHED 1
-#define ION_IOC_ALLOC _IOWR('I', 0, struct ion_allocation_data)
-#define ION_IOC_FREE _IOWR('I', 1, struct ion_handle_data)
-#define ION_IOC_SHARE _IOWR('I', 4, struct ion_fd_data)
-#define ION_IOC_CUSTOM _IOWR('I', 6, struct ion_custom_data)
-#define ION_IOC_CLEAN_CACHES _IOWR('M', 0, struct ion_flush_data)
-
-struct ion_buf {
-  int fd;
-  ion_user_handle_t handle;
-  uint8_t *map;
-  size_t size;
-};
-
-static struct {
-  int fd, own, ion, rot;  // the master fd from magic, and our own for the buffers so they go away with the process
-  uint32_t crtc, connector;
-  struct drm_mode_modeinfo mode;
-  struct ion_buf target, panel[2];
-  uint32_t fb[2];
-  int back, crtc_set;
-} D = {.fd = -1, .own = -1, .ion = -1, .rot = -1};
-
-static int ion_alloc(struct ion_buf *b, size_t size, int cached) {
-  struct ion_allocation_data alloc = {.len = size, .align = 4096, .heap_id_mask = 1 << ION_IOMMU_HEAP_ID,
-                                      .flags = cached ? ION_FLAG_CACHED : 0};
-  if (ioctl(D.ion, ION_IOC_ALLOC, &alloc)) return -errno;
-  b->handle = alloc.handle;
-  struct ion_fd_data share = {.handle = alloc.handle};
-  if (ioctl(D.ion, ION_IOC_SHARE, &share)) return -errno;
-  b->fd = share.fd;
-  b->size = size;  // set with the fd
-  b->map = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, b->fd, 0);
-  return b->map == MAP_FAILED ? (b->map = NULL, -errno) : 0;
-}
-
-static void ion_free(struct ion_buf *b) {
-  if (b->map) munmap(b->map, b->size);
-  if (b->size) close(b->fd);
-  if (b->handle) ioctl(D.ion, ION_IOC_FREE, &(struct ion_handle_data){.handle = b->handle});
-  memset(b, 0, sizeof(*b));
-}
-
-static int rot_queue(int type, int index, const struct ion_buf *b) {
-  // the rotator takes the dmabuf fd as the user pointer
-  struct v4l2_buffer buf = {.type = type, .memory = V4L2_MEMORY_USERPTR, .index = index, .m.userptr = b->fd,
-                            .length = b->size, .bytesused = b->size};
-  return ioctl(D.rot, VIDIOC_QBUF, &buf) ? -errno : 0;
-}
-
-static int rot_wait(int type) {
-  struct v4l2_buffer buf = {.type = type, .memory = V4L2_MEMORY_USERPTR};
-  if (ioctl(D.rot, VIDIOC_DQBUF, &buf)) return -errno;
-  return buf.flags & V4L2_BUF_FLAG_ERROR ? -EIO : 0;
-}
-
-void cr_display_close(void);
-
-// open the panel and the rotator into it
-int cr_display_init(int fd, int canonical_zero) {
-  uint32_t crtcs[8] = {0}, connectors[8] = {0};
-  struct drm_mode_card_res res = {.crtc_id_ptr = (uintptr_t)crtcs, .connector_id_ptr = (uintptr_t)connectors,
-                                  .count_crtcs = 8, .count_connectors = 8};
-  if (ioctl(fd, DRM_IOCTL_MODE_GETRESOURCES, &res) || !res.count_crtcs) return -errno;
-  for (uint32_t i = 0; i < MIN(res.count_connectors, 8); i++) {
-    struct drm_mode_modeinfo modes[16];
-    struct drm_mode_get_connector conn = {.connector_id = connectors[i], .modes_ptr = (uintptr_t)modes, .count_modes = 16};
-    if (ioctl(fd, DRM_IOCTL_MODE_GETCONNECTOR, &conn) == 0 && conn.connection == 1 && conn.count_modes > 0) {
-      D.connector = connectors[i];
-      D.mode = modes[0];
-      break;
-    }
-  }
-  if (!D.connector) return -ENODEV;
-  D.fd = fd;
-  D.crtc = crtcs[0];
-  D.own = open("/dev/dri/card0", O_RDWR | O_CLOEXEC);
-  D.ion = open("/dev/ion", O_RDWR);
-  D.rot = open("/dev/video2", O_RDWR);  // sde_rotator, a v4l2 mem2mem device
-  int pw = D.mode.hdisplay, ph = D.mode.vdisplay;
-  struct v4l2_control rotate = {.id = V4L2_CID_ROTATE, .value = canonical_zero ? 270 : 90};
-  // the v4l2 and DRM fourccs are the same
-  struct v4l2_format in = {.type = V4L2_BUF_TYPE_VIDEO_OUTPUT, .fmt.pix = {.width = ph, .height = pw, .pixelformat = DRM_FORMAT_ABGR8888}};
-  struct v4l2_format out = {.type = V4L2_BUF_TYPE_VIDEO_CAPTURE, .fmt.pix = {.width = pw, .height = ph, .pixelformat = DRM_FORMAT_ABGR8888}};
-  struct v4l2_requestbuffers reqs[2] = {{.count = 1, .type = V4L2_BUF_TYPE_VIDEO_OUTPUT, .memory = V4L2_MEMORY_USERPTR},
-                                        {.count = 2, .type = V4L2_BUF_TYPE_VIDEO_CAPTURE, .memory = V4L2_MEMORY_USERPTR}};
-  struct drm_auth auth;
-  int ret = D.own < 0 || ioctl(D.own, DRM_IOCTL_GET_MAGIC, &auth) || ioctl(fd, DRM_IOCTL_AUTH_MAGIC, &auth) ||
-            D.ion < 0 || D.rot < 0 || ioctl(D.rot, VIDIOC_S_CTRL, &rotate) || ioctl(D.rot, VIDIOC_S_FMT, &in) ||
-            ioctl(D.rot, VIDIOC_S_FMT, &out) ? -errno : 0;
-  if (!ret && in.fmt.pix.bytesperline != (uint32_t)ph * 4) ret = -EINVAL;
-  // the target is read back while drawing, so it's cached and cleaned before each rotation
-  if (!ret) ret = ion_alloc(&D.target, in.fmt.pix.sizeimage, 1);
-  for (int i = 0; i < 2 && !ret; i++) {
-    ret = ion_alloc(&D.panel[i], out.fmt.pix.sizeimage, 0);
-    struct drm_prime_handle prime = {.fd = D.panel[i].fd};
-    if (!ret && ioctl(D.own, DRM_IOCTL_PRIME_FD_TO_HANDLE, &prime)) ret = -errno;
-    struct drm_mode_fb_cmd2 fb = {.width = pw, .height = ph, .pixel_format = DRM_FORMAT_ABGR8888, .handles = {prime.handle},
-                                  .pitches = {out.fmt.pix.bytesperline}};
-    if (!ret && ioctl(D.own, DRM_IOCTL_MODE_ADDFB2, &fb)) ret = -errno;
-    D.fb[i] = fb.fb_id;
-  }
-  for (int i = 0; i < 2 && !ret; i++) {
-    if (ioctl(D.rot, VIDIOC_REQBUFS, &reqs[i]) || ioctl(D.rot, VIDIOC_STREAMON, &reqs[i].type)) ret = -errno;
-  }
-  if (ret) cr_display_close();
-  return ret;
-}
-
-// the buffer to draw into, if a width x height target is the panel's size
-uint8_t *cr_display_target(int width, int height) {
-  return width == D.mode.vdisplay && height == D.mode.hdisplay ? D.target.map : NULL;
-}
-
-// set a property of the display's CRTC to a blob of size bytes, or clear it when data is NULL
-int cr_display_blob(const char *name, const void *data, uint32_t size) {
-  uint32_t ids[128];
-  uint64_t values[128];
-  struct drm_mode_obj_get_properties props = {.props_ptr = (uintptr_t)ids, .prop_values_ptr = (uintptr_t)values, .count_props = 128,
-                                              .obj_id = D.crtc, .obj_type = DRM_MODE_OBJECT_CRTC};
-  if (ioctl(D.fd, DRM_IOCTL_MODE_OBJ_GETPROPERTIES, &props)) return -errno;
-  for (uint32_t i = 0; i < MIN(props.count_props, 128); i++) {
-    struct drm_mode_get_property prop = {.prop_id = ids[i]};
-    if (ioctl(D.fd, DRM_IOCTL_MODE_GETPROPERTY, &prop) || strcmp(prop.name, name)) continue;
-    struct drm_mode_create_blob blob = {.data = (uintptr_t)data, .length = size};
-    if (data && ioctl(D.fd, DRM_IOCTL_MODE_CREATEPROPBLOB, &blob)) return -errno;
-    struct drm_mode_obj_set_property set = {.value = data ? blob.blob_id : 0, .prop_id = ids[i], .obj_id = D.crtc,
-                                            .obj_type = DRM_MODE_OBJECT_CRTC};
-    int ret = ioctl(D.fd, DRM_IOCTL_MODE_OBJ_SETPROPERTY, &set) ? -errno : 0;
-    if (data) ioctl(D.fd, DRM_IOCTL_MODE_DESTROYPROPBLOB, &(struct drm_mode_destroy_blob){.blob_id = blob.blob_id});
-    return ret;
-  }
-  return -ENOENT;
-}
-
-// show the target on the panel at the next vblank
-int cr_display_present(void) {
-  if (T.pixels != D.target.map) return -EINVAL;
-  struct ion_flush_data flush = {.handle = D.target.handle, .vaddr = D.target.map, .length = D.target.size};
-  struct ion_custom_data clean = {.cmd = ION_IOC_CLEAN_CACHES, .arg = (uintptr_t)&flush};
-  if (ioctl(D.ion, ION_IOC_CUSTOM, &clean)) return -errno;
-  int ret = rot_queue(V4L2_BUF_TYPE_VIDEO_OUTPUT, 0, &D.target);
-  if (!ret) ret = rot_queue(V4L2_BUF_TYPE_VIDEO_CAPTURE, D.back, &D.panel[D.back]);
-  if (!ret) ret = rot_wait(V4L2_BUF_TYPE_VIDEO_CAPTURE);
-  if (!ret) ret = rot_wait(V4L2_BUF_TYPE_VIDEO_OUTPUT);
-  if (ret) {  // restarting the queues returns any buffers still in them
-    for (int type = V4L2_BUF_TYPE_VIDEO_CAPTURE; type <= V4L2_BUF_TYPE_VIDEO_OUTPUT; type++) {
-      ioctl(D.rot, VIDIOC_STREAMOFF, &type);
-      ioctl(D.rot, VIDIOC_STREAMON, &type);
-    }
-    return ret;
-  }
-  // like raylib: flip, or set the CRTC again if another DRM client disabled it, then wait for the vblank
-  uint32_t fb = D.fb[D.back];
-  struct drm_mode_crtc_page_flip flip = {.crtc_id = D.crtc, .fb_id = fb};
-  if (!D.crtc_set || ioctl(D.fd, DRM_IOCTL_MODE_PAGE_FLIP, &flip)) {
-    struct drm_mode_crtc set = {.crtc_id = D.crtc, .fb_id = fb, .set_connectors_ptr = (uintptr_t)&D.connector,
-                                .count_connectors = 1, .mode = D.mode, .mode_valid = 1};
-    D.crtc_set = ioctl(D.fd, DRM_IOCTL_MODE_SETCRTC, &set) == 0;
-    if (!D.crtc_set) return -errno;
-  }
-  union drm_wait_vblank vblank = {.request = {.type = _DRM_VBLANK_RELATIVE, .sequence = 1}};
-  ioctl(D.fd, DRM_IOCTL_WAIT_VBLANK, &vblank);
-  D.back ^= 1;
-  return 0;
-}
-
-void cr_display_close(void) {
-  if (D.rot >= 0) close(D.rot);
-  if (D.own >= 0) close(D.own);  // and with it the framebuffers
-  for (int i = 0; i < 2; i++) ion_free(&D.panel[i]);
-  ion_free(&D.target);
-  if (D.ion >= 0) close(D.ion);
-  memset(&D, 0, sizeof(D));
-  D.fd = D.own = D.ion = D.rot = -1;
-}
-#else
-int cr_display_init(int fd, int canonical_zero) { return -ENODEV; }
-uint8_t *cr_display_target(int width, int height) { return NULL; }
-int cr_display_blob(const char *name, const void *data, uint32_t size) { return -ENODEV; }
-int cr_display_present(void) { return -ENODEV; }
-void cr_display_close(void) {}
-#endif

@@ -1065,6 +1065,15 @@ typedef struct {
 //----------------------------------------------------------------------------------
 static sw_context_t RLSW = { 0 };
 
+#if defined(RLSW_RASTER_HOOK)
+// draws the current primitive, clipped and in screen space, instead of the rasterizer when it returns true
+static bool RLSW_RASTER_HOOK(uint32_t state);
+#endif
+#if defined(RLSW_TEXTURE_CHANGED)
+// a texture's pixels are about to change other than by drawing into it, or it's becoming a render target or freed
+static void RLSW_TEXTURE_CHANGED(const sw_texture_t *texture);
+#endif
+
 #if SW_USE_COLOR_LUT
 static float SW_LUT_UINT8_TO_FLOAT[256] = { 0 };
 #endif
@@ -2343,6 +2352,9 @@ static inline bool sw_texture_alloc(sw_texture_t *texture, const void *data, int
     bool isDepth = sw_pixel_is_depth_format(format);
     int bpp = SW_PIXELFORMAT_SIZE[format];
     int newSize = w*h*bpp;
+#if defined(RLSW_TEXTURE_CHANGED)
+    RLSW_TEXTURE_CHANGED(texture);
+#endif
 
     if (newSize > texture->allocSz)
     {
@@ -2401,6 +2413,9 @@ static inline bool sw_texture_alloc(sw_texture_t *texture, const void *data, int
 
 static inline void sw_texture_free(sw_texture_t *texture)
 {
+#if defined(RLSW_TEXTURE_CHANGED)
+    RLSW_TEXTURE_CHANGED(texture);
+#endif
     SW_FREE(texture->pixels);
 }
 
@@ -3399,6 +3414,9 @@ static void sw_triangle_render(uint32_t state)
 
     sw_triangle_clip_and_project();
     if (RLSW.primitive.vertexCount < 3) return;
+#if defined(RLSW_RASTER_HOOK)
+    if (RLSW_RASTER_HOOK(state)) return;
+#endif
 
     state &= SW_RASTER_TRIANGLE_STATE_MASK;
 
@@ -3550,6 +3568,9 @@ static void sw_quad_render(uint32_t state)
 
     sw_quad_clip_and_project();
     if (RLSW.primitive.vertexCount < 3) return;
+#if defined(RLSW_RASTER_HOOK)
+    if (RLSW_RASTER_HOOK(state)) return;
+#endif
 
     state &= SW_RASTER_QUAD_STATE_MASK;
 
@@ -3818,8 +3839,6 @@ static void sw_immediate_set_color(const float color[4])
     RLSW.primitive.color[1] = color[1];
     RLSW.primitive.color[2] = color[2];
     RLSW.primitive.color[3] = color[3];
-
-    RLSW.primitive.hasColorAlpha |= (color[3] < 1.0f);
 }
 
 static void sw_immediate_set_texcoord(const float texcoord[2])
@@ -3850,6 +3869,7 @@ static void sw_immediate_push_vertex(const float position[4])
 
     // Copy the attributes in the current vertex
     for (int i = 0; i < 4; i++) vertex->color[i] = RLSW.primitive.color[i];
+    RLSW.primitive.hasColorAlpha |= (vertex->color[3] < 1.0f);
     for (int i = 0; i < 2; i++) vertex->texcoord[i] = RLSW.primitive.texcoord[i];
 
     // Immediate rendering of the primitive if the required number is reached
@@ -5007,6 +5027,9 @@ void swTexSubImage2D(GLint x, GLint y, GLsizei width, GLsizei height, GLenum for
     const int srcPixelSize = SW_PIXELFORMAT_SIZE[srcPixelFormat];
     const int dstPixelSize = SW_PIXELFORMAT_SIZE[RLSW.boundTexture->format];
 
+#if defined(RLSW_TEXTURE_CHANGED)
+    RLSW_TEXTURE_CHANGED(RLSW.boundTexture);
+#endif
     const uint8_t *srcBytes = (const uint8_t *)pixels;
     uint8_t *dstBytes = (uint8_t *)RLSW.boundTexture->pixels;
 
@@ -5173,6 +5196,9 @@ void swFramebufferTexture2D(SWattachment attach, uint32_t texture)
         {
             fb->colorAttachment = texture;
             RLSW.colorBuffer = sw_pool_get(&RLSW.texturePool, texture);
+#if defined(RLSW_TEXTURE_CHANGED)
+            if (RLSW.colorBuffer) RLSW_TEXTURE_CHANGED(RLSW.colorBuffer);
+#endif
         } break;
         case SW_DEPTH_ATTACHMENT:
         {

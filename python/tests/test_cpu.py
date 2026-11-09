@@ -14,21 +14,41 @@ def target(w, h):
 
 
 class TestCpu(unittest.TestCase):
-  def test_clear_and_rect(self):
+  def test_rect(self):
     fb = target(8, 8)
-    cpu.clear(rl.Color(10, 20, 30, 255))
+    background = rl.Color(10, 20, 30, 255)
+    cpu.rect(0, 0, 8, 8, background, background, background, background)
     self.assertEqual(fb[0, 0].tolist(), [10, 20, 30, 255])
     c = rl.Color(255, 0, 0, 255)
     cpu.rect(2, 2, 4, 4, c, c, c, c)
     self.assertEqual(fb[2, 2].tolist(), [255, 0, 0, 255])
     self.assertEqual(fb[4, 4].tolist(), [10, 20, 30, 255])
 
+  def test_rect_blends_straight_alpha(self):
+    fb = target(1, 1)
+    white, half_red = rl.Color(255, 255, 255, 255), rl.Color(255, 0, 0, 128)
+    cpu.rect(0, 0, 1, 1, white, white, white, white)
+    cpu.rect(0, 0, 1, 1, half_red, half_red, half_red, half_red)
+    self.assertEqual(fb[0, 0].tolist(), [255, 127, 127, 255])
+
   def test_shared_horizontal_edge_blends_once(self):
     fb = target(20, 20)
     # a quad split along y = 5.5, which passes through pixel centers
     pts = np.array([[2, 2], [12, 2], [2, 5.5], [12, 5.5], [2, 9], [12, 9]], np.float32)
-    cpu.triangles(pts, np.array([0x80ffffff], np.uint32), 1)
+    cpu.triangles(pts, np.array([0x80ffffff], np.uint32), cpu.TRIANGLE_STRIP)
     self.assertEqual(set(fb[2:9, 2:12, 3].ravel().tolist()), {128})
+
+  def test_polygon_blends_once_where_it_overlaps_itself(self):
+    fb = target(8, 8)
+    square = [[1, 1], [5, 1], [5, 5], [1, 5]]
+    cpu.polygon(np.array(square + square, np.float32), np.array([0x80ffffff], np.uint32))
+    self.assertEqual(fb[:, :, 3].tolist(), [[128 if 1 <= x < 5 and 1 <= y < 5 else 0 for x in range(8)] for y in range(8)])
+
+  def test_polygon_ramp(self):
+    fb = target(4, 1)
+    red, blue = 0xff0000ff, 0xffff0000
+    cpu.polygon(np.array([[0, 0], [4, 0], [4, 1], [0, 1]], np.float32), np.array([red, blue], np.uint32), tx=0.25)
+    self.assertEqual(fb.view(np.uint32).ravel().tolist(), [red, red, blue, blue])
 
   def test_blit_samples_clamped_source(self):
     fb = target(4, 1)
@@ -52,13 +72,12 @@ class TestCpu(unittest.TestCase):
       cpu.blit(np.zeros(4, np.uint8), 4, 4, 16, False, rl.Rectangle(0, 0, 4, 4), rl.Rectangle(0, 0, 4, 4), rl.Vector2(0, 0), 0,
                rl.Color(255, 255, 255, 255), False)
     with self.assertRaises(TypeError):
-      cpu.triangles(np.zeros(6, np.float64), np.zeros(1, np.uint32), 0)
+      cpu.triangles(np.zeros(6, np.float64), np.zeros(1, np.uint32), cpu.TRIANGLE_LIST)
 
-  def test_no_display_off_device(self):
-    if rl._backend.backend != "comma":
-      self.assertLess(cpu.display_init(-1, False), 0)
-      self.assertIsNone(cpu.display_target(4, 4))
-      self.assertLess(cpu.display_blob("SDE_DSPP_GC_V1", None), 0)
+  def test_no_target_without_software_renderer(self):
+    if not cpu.software:
+      with self.assertRaises(RuntimeError):
+        cpu.target_raylib()
 
 
 if __name__ == "__main__":
