@@ -396,11 +396,11 @@ static bool draw_scaled_mask(int texture_slot, const blit_source *source, const 
 static float distance(point a, point b) { return hypotf(b.x - a.x, b.y - a.y); }
 
 // a textured quad as a blit, when it's a whole source rectangle drawn into a rectangle, rotated or mirrored.
-// false to leave it to rlsw
+// clipped, it can have more vertices along the source's edges, and texcoords a little off them. false to leave it to rlsw
 static bool blit_quad(const sw_texture_t *tex, const sw_vertex_t *vertices, const point *points, int count, uint32_t tint) {
-  if (count != 4) return false;
+  if (count < 4) return false;
   float u_min = vertices[0].texcoord[0], u_max = u_min, v_min = vertices[0].texcoord[1], v_max = v_min;
-  for (int i = 1; i < 4; i++) {
+  for (int i = 1; i < count; i++) {
     u_min = fminf(u_min, vertices[i].texcoord[0]);
     u_max = fmaxf(u_max, vertices[i].texcoord[0]);
     v_min = fminf(v_min, vertices[i].texcoord[1]);
@@ -408,14 +408,20 @@ static bool blit_quad(const sw_texture_t *tex, const sw_vertex_t *vertices, cons
   }
   if (u_min == u_max || v_min == v_max) return false;
 
-  // the vertices at the corners of the source: [v is max][u is max]
+  // the vertices at the corners of the source: [v is max][u is max]. every vertex is on its edges, within a hundredth of
+  // a texel, so with all four corners the polygon is the whole source
+  const float u_slack = 0.01f / tex->width, v_slack = 0.01f / tex->height;
   int at[2][2] = {{-1, -1}, {-1, -1}};
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < count; i++) {
     float u = vertices[i].texcoord[0], v = vertices[i].texcoord[1];
-    if ((u != u_min && u != u_max) || (v != v_min && v != v_max)) return false;
-    int v_is_max = v == v_max, u_is_max = u == u_max;
-    if (at[v_is_max][u_is_max] >= 0) return false;
-    at[v_is_max][u_is_max] = i;
+    bool u_is_min = u - u_min <= u_slack, u_is_max = u_max - u <= u_slack;
+    bool v_is_min = v - v_min <= v_slack, v_is_max = v_max - v <= v_slack;
+    bool on_u_edge = u_is_min || u_is_max, on_v_edge = v_is_min || v_is_max;
+    if (!on_u_edge && !on_v_edge) return false;
+    if (on_u_edge && on_v_edge) at[v_is_max][u_is_max] = i;
+  }
+  for (int corner = 0; corner < 4; corner++) {
+    if (at[corner >> 1][corner & 1] < 0) return false;
   }
   point source_top_left = points[at[0][0]], source_top_right = points[at[0][1]];
   point source_bottom_left = points[at[1][0]], source_bottom_right = points[at[1][1]];
