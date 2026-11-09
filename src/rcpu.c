@@ -199,8 +199,14 @@ static void fill_polygon(const point *points, int count, fill_span fill, const v
     if (p.y == q.y) continue;
     bool down = q.y > p.y;
     point top_end = down ? p : q, bottom_end = down ? q : p;
-    edge e = {top_end.x, top_end.y, (bottom_end.x - top_end.x) / (bottom_end.y - top_end.y),
-              MAX(first_pixel(top_end.y), T.y0), MIN(first_pixel(bottom_end.y), T.y1), down ? 1 : -1};
+    edge e = {
+      .x = top_end.x,
+      .y = top_end.y,
+      .dx_dy = (bottom_end.x - top_end.x) / (bottom_end.y - top_end.y),
+      .first_row = MAX(first_pixel(top_end.y), T.y0),
+      .end_row = MIN(first_pixel(bottom_end.y), T.y1),
+      .winding = down ? 1 : -1,
+    };
     if (e.first_row >= e.end_row) continue;
     top = MIN(top, e.first_row);
     bottom = MAX(bottom, e.end_row);
