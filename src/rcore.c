@@ -650,7 +650,7 @@ void InitWindow(int width, int height, const char *title)
 #elif defined(PLATFORM_COMMA)
     TRACELOG(LOG_INFO, "Platform backend: COMMA");
 #elif defined(PLATFORM_HEADLESS)
-    TRACELOG(LOG_INFO, "Platform backend: HEADLESS (EGL surfaceless)");
+    TRACELOG(LOG_INFO, "Platform backend: HEADLESS (software)");
 #elif defined(PLATFORM_MEMORY)
     TRACELOG(LOG_INFO, "Platform backend: MEMORY (No OS)");
 #else

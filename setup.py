@@ -44,7 +44,7 @@ def libraries(backend):
         return ["GL", "X11", "m", "pthread", "dl", "rt"]
     if backend == "comma":  # draws on the CPU
         return ["drm", "m", "pthread", "dl", "rt"]
-    return ["GLESv2", "EGL", "m", "pthread", "dl", "rt"]
+    return ["m", "pthread", "dl", "rt"]  # headless draws on the CPU too
 
 
 class BuildBindings(build_ext):

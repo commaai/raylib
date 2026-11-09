@@ -289,7 +289,8 @@ ifeq ($(TARGET_PLATFORM),PLATFORM_COMMA)
     GRAPHICS = GRAPHICS_API_OPENGL_SOFTWARE
 endif
 ifeq ($(TARGET_PLATFORM),PLATFORM_HEADLESS)
-    GRAPHICS = GRAPHICS_API_OPENGL_ES2
+    # Draw on the CPU, so no GL driver is needed
+    GRAPHICS = GRAPHICS_API_OPENGL_SOFTWARE
 endif
 ifeq ($(TARGET_PLATFORM),PLATFORM_WEB)
     # On HTML5 OpenGL ES 2.0 is used, emscripten translates it to WebGL 1.0
@@ -497,9 +498,6 @@ ifeq ($(TARGET_PLATFORM),PLATFORM_COMMA)
     CFLAGS += -Werror=implicit-function-declaration
 endif
 ifeq ($(TARGET_PLATFORM),PLATFORM_HEADLESS)
-    # without EGL_NO_X11 eglplatform.h tears Xlib.h in which tears X.h in
-    # which contains a conflicting type Font
-    CFLAGS += -DEGL_NO_X11
     CFLAGS += -Werror=implicit-function-declaration
 endif
 # Use Wayland display on Linux desktop
@@ -760,7 +758,7 @@ ifeq ($(TARGET_PLATFORM),PLATFORM_COMMA)
     endif
 endif
 ifeq ($(TARGET_PLATFORM),PLATFORM_HEADLESS)
-    LDLIBS = -lGLESv2 -lEGL -lpthread -lrt -lm -ldl
+    LDLIBS = -lpthread -lrt -lm -ldl
     ifeq ($(RAYLIB_MODULE_AUDIO),TRUE)
         LDLIBS += -latomic
     endif
