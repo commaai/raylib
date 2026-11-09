@@ -189,6 +189,7 @@ inline void bind_functions(nb::module_ &m) {
   m.def("get_collision_rec", &GetCollisionRec, nb::arg("rec1"), nb::arg("rec2"));
   m.def("load_image", &LoadImage, nb::arg("fileName"), nb::call_guard<nb::gil_scoped_release>());
   m.def("load_image_from_texture", &LoadImageFromTexture, nb::arg("texture"), nb::call_guard<nb::gil_scoped_release>());
+  m.def("load_image_from_screen", &LoadImageFromScreen, nb::call_guard<nb::gil_scoped_release>());
   m.def("unload_image", [](nb::handle value) {
     if (nb::hasattr(value, "_buffer")) throw nb::value_error("cannot unload an image backed by a Python buffer");
     auto &image = nb::cast<Image &>(value);

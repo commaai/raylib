@@ -102,6 +102,12 @@ class TestCpu(unittest.TestCase):
       screen = np.frombuffer(cpu.screen(), np.uint8).reshape(2, 4, 4)
       self.assertEqual(screen[1].tolist(), [[255, 0, 0, 255]] * 4)
       self.assertEqual(screen[0].tolist(), [[0, 0, 0, 255]] * 4)
+      # raylib's own readback is RGBA and top down, like GL's
+      image = rl.load_image_from_screen()
+      pixels = np.frombuffer(image.to_bytes(4 * 2 * 4), np.uint8).reshape(2, 4, 4)
+      rl.unload_image(image)
+      self.assertEqual(pixels[0].tolist(), [[255, 0, 0, 255]] * 4)
+      self.assertEqual(pixels[1].tolist(), [[0, 0, 0, 255]] * 4)
     finally:
       rl.close_window()
 

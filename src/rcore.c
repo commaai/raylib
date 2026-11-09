@@ -122,6 +122,9 @@
     #define RLSW_RASTER_HOOK cr_sw_raster               // rcpu draws the 2D primitives it can, see rcpu_rlsw.c
     #define RLSW_TEXTURE_CHANGED cr_sw_texture_changed  // and keeps textures ready for it
 #endif
+#if defined(PLATFORM_HEADLESS)
+    #define SW_FRAMEBUFFER_OUTPUT_BGRA false            // read back RGBA, like GL: nothing presents it as BGRA
+#endif
 #define RLGL_IMPLEMENTATION
 #include "rlgl.h"                   // OpenGL abstraction layer to OpenGL 1.1, 3.3+ or ES2
 
