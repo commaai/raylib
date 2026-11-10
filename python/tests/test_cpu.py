@@ -97,17 +97,21 @@ class TestCpu(unittest.TestCase):
       rl.begin_drawing()
       rl.clear_background(rl.BLACK)
       rl.draw_rectangle(0, 0, 4, 1, rl.Color(255, 0, 0, 255))
-      rl.end_drawing()
       # rows are bottom up, like GL's: the top row is last
-      screen = np.frombuffer(cpu.screen(), np.uint8).reshape(2, 4, 4)
+      screen = cpu.screen()
+      self.assertEqual(screen.shape, (2, 4, 4))
       self.assertEqual(screen[1].tolist(), [[255, 0, 0, 255]] * 4)
       self.assertEqual(screen[0].tolist(), [[0, 0, 0, 255]] * 4)
+      # and it's the screen, to draw on
+      screen[0] = 255
+      self.assertEqual(cpu.screen()[0].tolist(), [[255, 255, 255, 255]] * 4)
+      rl.end_drawing()
       # raylib's own readback is RGBA and top down, like GL's
       image = rl.load_image_from_screen()
       pixels = np.frombuffer(image.to_bytes(4 * 2 * 4), np.uint8).reshape(2, 4, 4)
       rl.unload_image(image)
       self.assertEqual(pixels[0].tolist(), [[255, 0, 0, 255]] * 4)
-      self.assertEqual(pixels[1].tolist(), [[0, 0, 0, 255]] * 4)
+      self.assertEqual(pixels[1].tolist(), [[255, 255, 255, 255]] * 4)
     finally:
       rl.close_window()
 

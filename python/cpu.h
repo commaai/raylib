@@ -4,6 +4,7 @@
 #include <cerrno>
 #include <cstring>
 
+#include <nanobind/ndarray.h>
 #include <rcpu.h>
 
 // the export of the target's buffer, held until the next target
@@ -58,16 +59,15 @@ inline void bind_cpu(nb::module_ &root) {
     cpu_release_target();
   });
 
-  // raylib's screen as drawn so far, read only and until it draws again: premultiplied RGBA8 rows, bottom up like GL's
+  // raylib's screen as drawn so far, until it presents: (height, width, 4) premultiplied RGBA8, rows bottom up like GL's
   m.def("screen", []() {
-    const uint8_t *pixels;
+    uint8_t *pixels;
     int width, height;
     int ret = cr_raylib_screen(&pixels, &width, &height);
     if (ret) throw nb::builtin_exception(nb::exception_type::runtime_error, std::strerror(-ret));
-    PyObject *view = PyMemoryView_FromMemory((char *)pixels, (Py_ssize_t)width * height * 4, PyBUF_READ);
-    if (!view) throw nb::python_error();
-    return nb::steal(view);
-  });
+    size_t shape[3] = {size_t(height), size_t(width), 4};
+    return nb::ndarray<nb::numpy, uint8_t, nb::ndim<3>>(pixels, 3, shape, nb::handle());
+  }, nb::rv_policy::reference);  // the screen itself, not a copy
 
   // rect, triangles and blit are what raylib's own drawing does with rcpu, for tests
   m.def("rect", [](float x0, float y0, float x1, float y1, Color top_left, Color top_right, Color bottom_left, Color bottom_right) {

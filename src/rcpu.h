@@ -20,9 +20,9 @@ void cr_transform(float scale, float tx, float ty);
 // coordinates and in its scissor. 0, or a negative errno when raylib draws with the GPU (ENODEV), into a texture that
 // isn't RGBA8 (ENOTSUP), or rotated (EINVAL). rcpu blends like GL's alpha blending where what's drawn over is opaque
 int cr_target_raylib(void);
-// the pixels of raylib's screen, as drawn so far: premultiplied RGBA8 rows, bottom up like GL's. 0, or -ENODEV when raylib
-// draws with the GPU
-int cr_raylib_screen(const uint8_t **pixels, int *width, int *height);
+// the pixels of raylib's screen, with what it drew so far, until it presents: premultiplied RGBA8 rows, bottom up like
+// GL's. 0, or -ENODEV when raylib draws with the GPU
+int cr_raylib_screen(uint8_t **pixels, int *width, int *height);
 
 // colors are packed r | g << 8 | b << 16 | a << 24, straight alpha
 void cr_premultiply(uint32_t *dst, const uint32_t *src, size_t count);

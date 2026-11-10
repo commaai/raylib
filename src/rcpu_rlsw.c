@@ -523,9 +523,10 @@ static bool cr_sw_raster(uint32_t state) {
   return true;
 }
 
-int cr_raylib_screen(const uint8_t **pixels, int *width, int *height) {
+int cr_raylib_screen(uint8_t **pixels, int *width, int *height) {
   const sw_texture_t *screen = &RLSW.framebuffer.color;
   if (!screen->pixels) return -ENODEV;
+  rlDrawRenderBatchActive();
   *pixels = screen->pixels;
   *width = screen->width;
   *height = screen->height;
@@ -534,5 +535,5 @@ int cr_raylib_screen(const uint8_t **pixels, int *width, int *height) {
 
 #else
 int cr_target_raylib(void) { return -ENODEV; }
-int cr_raylib_screen(const uint8_t **pixels, int *width, int *height) { return -ENODEV; }
+int cr_raylib_screen(uint8_t **pixels, int *width, int *height) { return -ENODEV; }
 #endif
