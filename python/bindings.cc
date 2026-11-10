@@ -7,6 +7,7 @@ namespace nb = nanobind;
 using namespace nb::literals;
 
 #include "functions.h"
+#include "cpu.h"
 
 #ifndef RAYLIB_MODULE
 #define RAYLIB_MODULE _raylib_desktop
@@ -93,6 +94,7 @@ NB_MODULE(RAYLIB_MODULE, m) {
   m.attr("RenderTexture2D") = m.attr("RenderTexture");
   m.attr("RAYLIB_VERSION_MAJOR") = RAYLIB_VERSION_MAJOR;
   bind_functions(m);
+  bind_cpu(m);
   // Release the native-held Python reference before interpreter teardown. A
   // module capsule alone cannot break a callback -> globals -> module cycle.
   m.def("_clear_trace_log_callback", &clear_trace_log_callback);

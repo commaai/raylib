@@ -4,7 +4,7 @@
 *
 *   PLATFORM: HEADLESS
 *       - Offscreen rendering without any display server (no X11, Wayland, DRM/KMS)
-*       - EGL surfaceless platform (Mesa) with a pbuffer surface, OpenGL ES 2.0+
+*       - Drawn on the CPU by rlsw, raylib's software renderer, with no GL driver
 *
 *   LIMITATIONS:
 *       - No window is ever shown; window flags are accepted but ignored
@@ -12,7 +12,7 @@
 *         (e.g. SetMousePosition()) or injected above raylib
 *
 *   DEPENDENCIES:
-*       - EGL and OpenGL ES 2.0 libraries (Mesa llvmpipe works, no GPU required)
+*       - rlsw: Software renderer
 *
 *   LICENSE: zlib/libpng
 *
@@ -37,140 +37,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <EGL/egl.h>
-#include <EGL/eglext.h>
-
-#include <GLES2/gl2.h>
-
-#ifndef EGL_PLATFORM_SURFACELESS_MESA
-  #define EGL_PLATFORM_SURFACELESS_MESA 0x31DD
-#endif
-
-//----------------------------------------------------------------------------------
-// Types and Structures Definition
-//----------------------------------------------------------------------------------
-
-typedef struct {
-  EGLDisplay display;
-  EGLSurface surface;   // pbuffer sized to the requested window
-  EGLContext context;
-} PlatformData;
-
 //----------------------------------------------------------------------------------
 // Global Variables Definition
 //----------------------------------------------------------------------------------
 extern CoreData CORE;                   // Global CORE state context
-
-static PlatformData platform = { 0 };   // Platform specific data
-
-//----------------------------------------------------------------------------------
-// Headless specific code
-//----------------------------------------------------------------------------------
-
-#define CASE_STR( value ) case value: return #value;
-static const char *eglGetErrorString(EGLint error) {
-    switch(error) {
-      CASE_STR( EGL_SUCCESS             )
-      CASE_STR( EGL_NOT_INITIALIZED     )
-      CASE_STR( EGL_BAD_ACCESS          )
-      CASE_STR( EGL_BAD_ALLOC           )
-      CASE_STR( EGL_BAD_ATTRIBUTE       )
-      CASE_STR( EGL_BAD_CONTEXT         )
-      CASE_STR( EGL_BAD_CONFIG          )
-      CASE_STR( EGL_BAD_CURRENT_SURFACE )
-      CASE_STR( EGL_BAD_DISPLAY         )
-      CASE_STR( EGL_BAD_SURFACE         )
-      CASE_STR( EGL_BAD_MATCH           )
-      CASE_STR( EGL_BAD_PARAMETER       )
-      CASE_STR( EGL_BAD_NATIVE_PIXMAP   )
-      CASE_STR( EGL_BAD_NATIVE_WINDOW   )
-      CASE_STR( EGL_CONTEXT_LOST        )
-      default: return "Unknown";
-    }
-}
-#undef CASE_STR
-
-static EGLDisplay get_egl_display(void) {
-  // Prefer the Mesa surfaceless platform: works with no display server and no
-  // DRM device node (llvmpipe), which is exactly the CI environment
-  const char *client_exts = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
-  if (client_exts && strstr(client_exts, "EGL_EXT_platform_base") && strstr(client_exts, "EGL_MESA_platform_surfaceless")) {
-    PFNEGLGETPLATFORMDISPLAYEXTPROC getPlatformDisplay = (PFNEGLGETPLATFORMDISPLAYEXTPROC)eglGetProcAddress("eglGetPlatformDisplayEXT");
-    if (getPlatformDisplay) {
-      EGLDisplay display = getPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, NULL);
-      if (display != EGL_NO_DISPLAY) return display;
-    }
-  }
-
-  // Fallback for non-Mesa stacks (honors the EGL_PLATFORM env var)
-  return eglGetDisplay(EGL_DEFAULT_DISPLAY);
-}
-
-static int init_egl(void) {
-  EGLint major, minor;
-  EGLConfig config = NULL;
-  EGLint num_config = 0;
-  EGLint frame_buffer_config[] = {
-    EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
-    EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
-    EGL_RED_SIZE,     8,
-    EGL_GREEN_SIZE,   8,
-    EGL_BLUE_SIZE,    8,
-    EGL_ALPHA_SIZE,   8,
-    EGL_DEPTH_SIZE,   24,
-    EGL_STENCIL_SIZE, 8,
-    EGL_NONE
-  };
-  // ask for an OpenGL ES 2 rendering context; drivers return the highest
-  // backward-compatible version (e.g. ES 3.2 on Mesa)
-  EGLint context_config[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE };
-  EGLint pbuffer_config[] = {
-    EGL_WIDTH, (EGLint)CORE.Window.screen.width,
-    EGL_HEIGHT, (EGLint)CORE.Window.screen.height,
-    EGL_NONE
-  };
-
-  platform.display = get_egl_display();
-  if (platform.display == EGL_NO_DISPLAY) {
-    TRACELOG(LOG_WARNING, "HEADLESS: Failed to get an EGL display");
-    return -1;
-  }
-
-  if (!eglInitialize(platform.display, &major, &minor)) {
-    TRACELOG(LOG_WARNING, "HEADLESS: Failed to initialize the EGL display. Error code: %s", eglGetErrorString(eglGetError()));
-    return -1;
-  }
-  TRACELOG(LOG_INFO, "HEADLESS: Using EGL version %i.%i", major, minor);
-
-  if (!eglBindAPI(EGL_OPENGL_ES_API)) {
-    TRACELOG(LOG_WARNING, "HEADLESS: Failed to bind the OpenGL ES API. Error code: %s", eglGetErrorString(eglGetError()));
-    return -1;
-  }
-
-  if (!eglChooseConfig(platform.display, frame_buffer_config, &config, 1, &num_config) || num_config < 1) {
-    TRACELOG(LOG_WARNING, "HEADLESS: Failed to choose an EGL config. Error code: %s", eglGetErrorString(eglGetError()));
-    return -1;
-  }
-
-  platform.surface = eglCreatePbufferSurface(platform.display, config, pbuffer_config);
-  if (platform.surface == EGL_NO_SURFACE) {
-    TRACELOG(LOG_WARNING, "HEADLESS: Failed to create an EGL pbuffer surface. Error code: %s", eglGetErrorString(eglGetError()));
-    return -1;
-  }
-
-  platform.context = eglCreateContext(platform.display, config, EGL_NO_CONTEXT, context_config);
-  if (platform.context == EGL_NO_CONTEXT) {
-    TRACELOG(LOG_WARNING, "HEADLESS: Failed to create an OpenGL ES context. Error code: %s", eglGetErrorString(eglGetError()));
-    return -1;
-  }
-
-  if (!eglMakeCurrent(platform.display, platform.surface, platform.surface, platform.context)) {
-    TRACELOG(LOG_WARNING, "HEADLESS: Failed to attach the OpenGL ES context to the EGL surface. Error code: %s", eglGetErrorString(eglGetError()));
-    return -1;
-  }
-
-  return 0;
-}
 
 //----------------------------------------------------------------------------------
 // Module Internal Functions Declaration
@@ -380,10 +250,8 @@ void DisableCursor(void) {
 }
 
 // Swap back buffer with front buffer (screen drawing)
+// Nothing shows it: the frame stays in rlsw's framebuffer, to be read back
 void SwapScreenBuffer(void) {
-  // eglSwapBuffers() is defined to be a no-op on pbuffer surfaces, but it still
-  // marks the frame boundary for the driver
-  eglSwapBuffers(platform.display, platform.surface);
 }
 
 //----------------------------------------------------------------------------------
@@ -489,14 +357,6 @@ int InitPlatform(void) {
   CORE.Window.renderOffset.x = 0;
   CORE.Window.renderOffset.y = 0;
 
-  if (init_egl()) {
-    TRACELOG(LOG_FATAL, "HEADLESS: Failed to initialize EGL");
-    return -1;
-  }
-
-  rlLoadExtensions(eglGetProcAddress);
-  TRACELOG(LOG_INFO, "HEADLESS: OpenGL version: %s", glGetString(GL_VERSION));
-
   InitTimer();
   CORE.Storage.basePath = GetWorkingDirectory();
 
@@ -508,22 +368,4 @@ int InitPlatform(void) {
 
 void ClosePlatform(void) {
   CORE.Window.ready = false;
-
-  if (platform.display != EGL_NO_DISPLAY) {
-    eglMakeCurrent(platform.display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-
-    if (platform.surface != EGL_NO_SURFACE) {
-      eglDestroySurface(platform.display, platform.surface);
-      platform.surface = EGL_NO_SURFACE;
-    }
-    if (platform.context != EGL_NO_CONTEXT) {
-      eglDestroyContext(platform.display, platform.context);
-      platform.context = EGL_NO_CONTEXT;
-    }
-    eglTerminate(platform.display);
-    platform.display = EGL_NO_DISPLAY;
-  }
-
-  // fully release EGL thread state so init -> close -> init works
-  eglReleaseThread();
 }

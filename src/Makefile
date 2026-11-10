@@ -284,8 +284,13 @@ ifeq ($(TARGET_PLATFORM),PLATFORM_DRM)
     GRAPHICS ?= GRAPHICS_API_OPENGL_ES2
     #GRAPHICS = GRAPHICS_API_OPENGL_SOFTWARE # Uncomment to use software rendering
 endif
-ifeq ($(TARGET_PLATFORM),$(filter $(TARGET_PLATFORM),PLATFORM_COMMA PLATFORM_HEADLESS))
-    GRAPHICS = GRAPHICS_API_OPENGL_ES2
+ifeq ($(TARGET_PLATFORM),PLATFORM_COMMA)
+    # Draw on the CPU, so the GPU is free for the driving model
+    GRAPHICS = GRAPHICS_API_OPENGL_SOFTWARE
+endif
+ifeq ($(TARGET_PLATFORM),PLATFORM_HEADLESS)
+    # Draw on the CPU, so no GL driver is needed
+    GRAPHICS = GRAPHICS_API_OPENGL_SOFTWARE
 endif
 ifeq ($(TARGET_PLATFORM),PLATFORM_WEB)
     # On HTML5 OpenGL ES 2.0 is used, emscripten translates it to WebGL 1.0
@@ -424,7 +429,7 @@ ifeq ($(RAYLIB_BUILD_MODE),RELEASE)
     ifeq ($(TARGET_PLATFORM),PLATFORM_ANDROID)
         CFLAGS += -O2
     endif
-    ifeq ($(TARGET_PLATFORM),$(filter $(TARGET_PLATFORM),PLATFORM_COMMA PLATFORM_HEADLESS))
+    ifeq ($(TARGET_PLATFORM),$(filter $(TARGET_PLATFORM),PLATFORM_COMMA PLATFORM_HEADLESS PLATFORM_DESKTOP_RGFW))
         CFLAGS += -O2
     endif
 endif
@@ -493,9 +498,6 @@ ifeq ($(TARGET_PLATFORM),PLATFORM_COMMA)
     CFLAGS += -Werror=implicit-function-declaration
 endif
 ifeq ($(TARGET_PLATFORM),PLATFORM_HEADLESS)
-    # without EGL_NO_X11 eglplatform.h tears Xlib.h in which tears X.h in
-    # which contains a conflicting type Font
-    CFLAGS += -DEGL_NO_X11
     CFLAGS += -Werror=implicit-function-declaration
 endif
 # Use Wayland display on Linux desktop
@@ -750,13 +752,13 @@ ifeq ($(TARGET_PLATFORM),PLATFORM_DESKTOP_WIN32)
     endif
 endif
 ifeq ($(TARGET_PLATFORM),PLATFORM_COMMA)
-    LDLIBS = -lGLESv2 -lEGL -lgbm -ldrm -lpthread -lrt -lm -ldl
+    LDLIBS = -ldrm -lpthread -lrt -lm -ldl
     ifeq ($(RAYLIB_MODULE_AUDIO),TRUE)
         LDLIBS += -latomic
     endif
 endif
 ifeq ($(TARGET_PLATFORM),PLATFORM_HEADLESS)
-    LDLIBS = -lGLESv2 -lEGL -lpthread -lrt -lm -ldl
+    LDLIBS = -lpthread -lrt -lm -ldl
     ifeq ($(RAYLIB_MODULE_AUDIO),TRUE)
         LDLIBS += -latomic
     endif
@@ -770,7 +772,8 @@ endif
 OBJS = rcore.o \
        rshapes.o \
        rtextures.o \
-       rtext.o
+       rtext.o \
+       rcpu.o
 
 ifeq ($(TARGET_PLATFORM),PLATFORM_DESKTOP_GLFW)
     ifeq ($(USE_EXTERNAL_GLFW),FALSE)
@@ -883,7 +886,7 @@ endif
 rcore.o : platforms/*.c
 
 # Compile core module
-rcore.o : rcore.c raylib.h rlgl.h raymath.h rcamera.h rgestures.h
+rcore.o : rcore.c raylib.h rlgl.h raymath.h rcamera.h rgestures.h rcpu.h rcpu_rlsw.c external/rlsw.h
 	$(CC) -c $< $(CFLAGS) $(INCLUDE_PATHS)
 
 # Compile rglfw module
@@ -900,6 +903,10 @@ rtextures.o : rtextures.c raylib.h rlgl.h
 
 # Compile text module
 rtext.o : rtext.c raylib.h
+	$(CC) -c $< $(CFLAGS) $(INCLUDE_PATHS)
+
+# Compile software rasterizer module
+rcpu.o : rcpu.c rcpu.h
 	$(CC) -c $< $(CFLAGS) $(INCLUDE_PATHS)
 
 # Compile models module
