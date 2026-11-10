@@ -274,10 +274,15 @@ static void set_color_correction(bool enable) {
   }
   const void *blobs[3] = {&igc, &pcc, &gc};
   const uint32_t sizes[3] = {sizeof(igc), sizeof(pcc), sizeof(gc)};
+  bool applied = true;
   for (int i = 0; i < 3; i++) {
     int ret = set_crtc_blob(names[i], blobs[i], sizes[i]);
-    if (ret) TRACELOG(LOG_WARNING, "COMMA: Failed to set %s: %s", names[i], strerror(-ret));
+    if (ret) {
+      applied = false;
+      TRACELOG(LOG_WARNING, "COMMA: Failed to set %s: %s", names[i], strerror(-ret));
+    }
   }
+  if (applied) TRACELOG(LOG_INFO, "COMMA: Successfully setup color correction");
 }
 
 static int recv_fd(int sock) {
