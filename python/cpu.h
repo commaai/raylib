@@ -21,7 +21,9 @@ inline void cpu_release_target() {
 // rcpu keeps points and edges on the stack
 constexpr Py_ssize_t max_points = 1 << 16;
 
-inline uint32_t cpu_color(Color c) { return c.r | c.g << 8 | c.b << 16 | uint32_t(c.a) << 24; }
+inline uint32_t cpu_color(Color c) {
+  return c.r | c.g << 8 | c.b << 16 | uint32_t(c.a) << 24;
+}
 
 inline void cpu_check(const RaylibBuffer &buffer, size_t size, const char *what) {
   if (size_t(buffer.view.len) < size) throw nb::value_error(what);
@@ -77,10 +79,12 @@ inline void bind_cpu(nb::module_ &root) {
 
   // points are float32 x, y pairs, and colors packed uint32 colors, one per point or one for all
   m.def("triangles", [](nb::handle points, nb::handle colors, int mode) {
-    RaylibBuffer p(points), c(colors);
+    RaylibBuffer p(points);
+    RaylibBuffer c(colors);
     if (!p.view.format || std::strcmp(p.view.format, "f") || c.view.itemsize != 4) throw nb::type_error("points must be float32 and colors uint32");
     if (p.view.len / 8 > max_points) throw nb::value_error("too many points");
-    const int count = int(p.view.len / 8), color_count = int(c.view.len / 4);
+    const int count = int(p.view.len / 8);
+    const int color_count = int(c.view.len / 4);
     if (color_count != 1 && color_count != count) throw nb::value_error("give one color, or one per point");
     if (mode < CR_TRIANGLE_LIST || mode > CR_TRIANGLE_FAN) throw nb::value_error("invalid triangle mode");
     nb::gil_scoped_release gil;
@@ -90,10 +94,12 @@ inline void bind_cpu(nb::module_ &root) {
   // points are float32 x, y pairs, and colors packed uint32 straight alpha colors: a ramp from t = 0 to 1 at
   // t = tx * x + ty * y + t0, or one color
   m.def("polygon", [](nb::handle points, nb::handle colors, float tx, float ty, float t0) {
-    RaylibBuffer p(points), c(colors);
+    RaylibBuffer p(points);
+    RaylibBuffer c(colors);
     if (!p.view.format || std::strcmp(p.view.format, "f") || c.view.itemsize != 4) throw nb::type_error("points must be float32 and colors uint32");
     if (p.view.len / 8 > max_points) throw nb::value_error("too many points");
-    const int count = int(p.view.len / 8), color_count = int(c.view.len / 4);
+    const int count = int(p.view.len / 8);
+    const int color_count = int(c.view.len / 4);
     if (color_count < 1 || color_count > 1024) throw nb::value_error("give 1 to 1024 colors");
     nb::gil_scoped_release gil;
     cr_polygon(static_cast<const float *>(p.view.buf), count, static_cast<const uint32_t *>(c.view.buf), color_count, tx, ty, t0);
@@ -113,7 +119,8 @@ inline void bind_cpu(nb::module_ &root) {
   // an NV12 frame, opaque. curve maps each channel from -512 to 767, and saturation is out of 256
   m.def("nv12", [](nb::handle frame, int uv_offset, int stride, int width, int height, Rectangle dst, bool flip_x,
                    nb::handle curve, int saturation, bool new_frame) {
-    RaylibBuffer f(frame), c(curve);
+    RaylibBuffer f(frame);
+    RaylibBuffer c(curve);
     if (width <= 0 || height <= 0 || stride < width || uv_offset < stride * height) throw nb::value_error("invalid frame dimensions");
     cpu_check(f, size_t(uv_offset) + size_t(stride) * size_t((height + 1) / 2), "frame buffer is smaller than its dimensions");
     cpu_check(c, 1280, "curve needs 1280 entries");

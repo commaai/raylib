@@ -239,7 +239,9 @@ static void set_color_correction(bool enable) {
   static pcc_blob pcc;
   static gc_blob gc;
   struct color_correction_values *ccv = enable && !platform.canonical_zero ? read_correction_values() : NULL;
-  float gamma = 0.0f, ccm[9], gains[3];
+  float gamma = 0.0f;
+  float ccm[9];
+  float gains[3];
   bool valid = ccv != NULL;
   if (ccv) {
     gamma = decode_float16(ccv->gamma);

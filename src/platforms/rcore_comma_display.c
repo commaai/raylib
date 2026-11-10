@@ -87,7 +87,8 @@ static void display_close(void) {
 }
 
 static int display_setup(void) {
-  int panel_width = platform.drm.mode.hdisplay, panel_height = platform.drm.mode.vdisplay;
+  int panel_width = platform.drm.mode.hdisplay;
+  int panel_height = platform.drm.mode.vdisplay;
   struct v4l2_control rotate = {.id = V4L2_CID_ROTATE, .value = platform.canonical_zero ? 270 : 90};
   struct v4l2_control flip = {.id = V4L2_CID_VFLIP, .value = 1};
   // the v4l2 and DRM fourccs are the same
@@ -107,7 +108,9 @@ static int display_setup(void) {
     if (ret) return ret;
     uint32_t handle;
     if (drmPrimeFDToHandle(platform.drm.render_fd, display.panel[i].fd, &handle)) return -errno;
-    uint32_t handles[4] = {handle}, pitches[4] = {out.fmt.pix.bytesperline}, offsets[4] = {0};
+    uint32_t handles[4] = {handle};
+    uint32_t pitches[4] = {out.fmt.pix.bytesperline};
+    uint32_t offsets[4] = {0};
     if (drmModeAddFB2(platform.drm.render_fd, panel_width, panel_height, DRM_FORMAT_ABGR8888, handles, pitches, offsets,
                       &display.framebuffers[i], 0)) return -errno;
   }
@@ -175,7 +178,8 @@ static int rotator_wait(int type) {
 
 // restarting the rotator's queues returns any buffers still in them
 static void rotator_restart(void) {
-  int output = V4L2_BUF_TYPE_VIDEO_OUTPUT, capture = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+  int output = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+  int capture = V4L2_BUF_TYPE_VIDEO_CAPTURE;
   ioctl(display.rotator_fd, VIDIOC_STREAMOFF, &output);
   ioctl(display.rotator_fd, VIDIOC_STREAMOFF, &capture);
   ioctl(display.rotator_fd, VIDIOC_STREAMON, &output);
@@ -201,4 +205,6 @@ static int display_rotate(uint32_t *framebuffer) {
 }
 
 // the back panel buffer is on screen, the other one is the back now
-static void display_shown(void) { display.back ^= 1; }
+static void display_shown(void) {
+  display.back ^= 1;
+}

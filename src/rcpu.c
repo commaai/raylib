@@ -42,10 +42,17 @@ void cr_transform(float scale, float tx, float ty) {
   T.ty = ty;
 }
 
-static inline float to_x(float x) { return x * T.scale + T.tx; }
-static inline float to_y(float y) { return y * T.scale + T.ty; }
+static inline float to_x(float x) {
+  return x * T.scale + T.tx;
+}
 
-static inline uint32_t *row(int y) { return (uint32_t *)(T.pixels + (ptrdiff_t)y * T.stride); }
+static inline float to_y(float y) {
+  return y * T.scale + T.ty;
+}
+
+static inline uint32_t *row(int y) {
+  return (uint32_t *)(T.pixels + (ptrdiff_t)y * T.stride);
+}
 
 // have n pixels from p cached before they're drawn. a screen's rows are far apart and mostly out of the cache, which
 // stalls drawing narrow things, like glyphs, row after row
@@ -57,12 +64,19 @@ static inline void prefetch(const uint32_t *p, int n) {
 }
 
 // the first pixel whose center is at or after a
-static inline int first_pixel(float a) { return (int)ceilf(a - 0.5f); }
+static inline int first_pixel(float a) {
+  return (int)ceilf(a - 0.5f);
+}
 
 // ***** colors *****
 
-static inline uint32_t rgba(uint32_t r, uint32_t g, uint32_t b, uint32_t a) { return r | g << 8 | b << 16 | a << 24; }
-static inline uint32_t alpha(uint32_t c) { return c >> 24; }
+static inline uint32_t rgba(uint32_t r, uint32_t g, uint32_t b, uint32_t a) {
+  return r | g << 8 | b << 16 | a << 24;
+}
+
+static inline uint32_t alpha(uint32_t c) {
+  return c >> 24;
+}
 
 // all four channels scaled by a/255, rounded. two channels at a time: red with blue, and green with alpha.
 // x/255 is computed as (x + x/256) / 256
@@ -99,7 +113,9 @@ static inline uint32_t over(uint32_t dst, uint32_t src) {
 }
 
 // from a to b by t out of 255
-static inline uint32_t lerp(uint32_t a, uint32_t b, uint32_t t) { return mul(a, 255 - t) + mul(b, t); }
+static inline uint32_t lerp(uint32_t a, uint32_t b, uint32_t t) {
+  return mul(a, 255 - t) + mul(b, t);
+}
 
 void cr_premultiply(uint32_t *dst, const uint32_t *src, size_t count) {
   for (size_t i = 0; i < count; i++) dst[i] = premultiply(src[i]);
@@ -129,8 +145,10 @@ void cr_rect(float x0, float y0, float x1, float y1, uint32_t top_left, uint32_t
   y0 = to_y(y0);
   x1 = to_x(x1);
   y1 = to_y(y1);
-  int left = MAX(first_pixel(x0), T.x0), right = MIN(first_pixel(x1), T.x1);
-  int top = MAX(first_pixel(y0), T.y0), bottom = MIN(first_pixel(y1), T.y1);
+  int left = MAX(first_pixel(x0), T.x0);
+  int right = MIN(first_pixel(x1), T.x1);
+  int top = MAX(first_pixel(y0), T.y0);
+  int bottom = MIN(first_pixel(y1), T.y1);
   if (left >= right || top >= bottom) return;
 
   // the fraction of the way across at each column, the same for every row
@@ -140,7 +158,8 @@ void cr_rect(float x0, float y0, float x1, float y1, uint32_t top_left, uint32_t
   }
   for (int y = top; y < bottom; y++) {
     uint32_t down = fraction(y + 0.5f, y0, y1);
-    uint32_t row_left = lerp(top_left, bottom_left, down), row_right = lerp(top_right, bottom_right, down);
+    uint32_t row_left = lerp(top_left, bottom_left, down);
+    uint32_t row_right = lerp(top_right, bottom_right, down);
     uint32_t *dst = row(y) + left;
     if (row_left == row_right) {
       span(dst, right - left, premultiply(row_left));
@@ -193,12 +212,16 @@ static void sort_by_first_row(edge *edges, int count) {
 
 static void fill_polygon(const point *points, int count, fill_span fill, const void *paint) {
   edge edges[count];
-  int edge_count = 0, top = T.y1, bottom = T.y0;
+  int edge_count = 0;
+  int top = T.y1;
+  int bottom = T.y0;
   for (int i = 0; i < count; i++) {
-    point p = points[i], q = points[(i + 1) % count];
+    point p = points[i];
+    point q = points[(i + 1) % count];
     if (p.y == q.y) continue;
     bool down = q.y > p.y;
-    point top_end = down ? p : q, bottom_end = down ? q : p;
+    point top_end = down ? p : q;
+    point bottom_end = down ? q : p;
     edge e = {
       .x = top_end.x,
       .y = top_end.y,
@@ -216,7 +239,9 @@ static void fill_polygon(const point *points, int count, fill_span fill, const v
   sort_by_first_row(edges, edge_count);
 
   // row by row, the edges crossing it, sorted along it
-  int active[edge_count], active_count = 0, next_edge = 0;
+  int active[edge_count];
+  int active_count = 0;
+  int next_edge = 0;
   crossing crossings[edge_count];
   for (int y = top; y < bottom; y++) {
     int still_active = 0;
@@ -238,7 +263,8 @@ static void fill_polygon(const point *points, int count, fill_span fill, const v
     int winding = 0;
     for (int i = 0; i + 1 < active_count; i++) {
       winding += crossings[i].winding;
-      int x0 = MAX(first_pixel(crossings[i].x), T.x0), x1 = MIN(first_pixel(crossings[i + 1].x), T.x1);
+      int x0 = MAX(first_pixel(crossings[i].x), T.x0);
+      int x1 = MIN(first_pixel(crossings[i + 1].x), T.x1);
       if (winding != 0 && x0 < x1) fill(dst, x0, x1, y, paint);
     }
   }
@@ -311,8 +337,11 @@ static void triangle(point a, point b, point c, uint32_t color_a, uint32_t color
   const uint32_t colors[3] = {color_a, color_b, color_c};
   color_planes planes = {{0}, {0}, {0.5f, 0.5f, 0.5f, 0.5f}};  // the halves round
   for (int k = 0; k < 3; k++) {
-    point p = corners[(k + 1) % 3], q = corners[(k + 2) % 3];
-    float wx = p.y - q.y, wy = q.x - p.x, w0 = -wy * p.y - wx * p.x;
+    point p = corners[(k + 1) % 3];
+    point q = corners[(k + 2) % 3];
+    float wx = p.y - q.y;
+    float wy = q.x - p.x;
+    float w0 = -wy * p.y - wx * p.x;
     for (int s = 0; s < 4; s++) {
       float channel = ((colors[k] >> (8 * s)) & 255) / area;
       planes.cx[s] += wx * channel;
@@ -331,7 +360,8 @@ void cr_triangles(const float *xy, int count, const uint32_t *colors, int color_
   for (int i = 2; i < count; i += step) {
     int first = mode == CR_TRIANGLE_FAN ? 0 : i - 2;
     uint32_t color_first = colors[color_count == 1 ? 0 : first];
-    uint32_t color_before = colors[color_count == 1 ? 0 : i - 1], color_last = colors[color_count == 1 ? 0 : i];
+    uint32_t color_before = colors[color_count == 1 ? 0 : i - 1];
+    uint32_t color_last = colors[color_count == 1 ? 0 : i];
     triangle(points[first], points[i - 1], points[i], color_first, color_before, color_last);
   }
 }
@@ -387,10 +417,12 @@ __attribute__((always_inline)) static inline uint32_t sample(const uint8_t *src,
   uint32_t c = texel_at(top, false, x.first);
   if (filtered) {
     uint32_t top_right = texel_at(top, false, x.second);
-    uint32_t bottom_left = texel_at(bottom, false, x.first), bottom_right = texel_at(bottom, false, x.second);
+    uint32_t bottom_left = texel_at(bottom, false, x.first);
+    uint32_t bottom_right = texel_at(bottom, false, x.second);
     // mixing a texel with itself is that texel, as within or around an icon
     if (top_right != c || bottom_left != c || bottom_right != c) {
-      uint32_t wx = x.weight * 255 >> 8, wy = y.weight * 255 >> 8;
+      uint32_t wx = x.weight * 255 >> 8;
+      uint32_t wy = y.weight * 255 >> 8;
       c = lerp(lerp(c, top_right, wx), lerp(bottom_left, bottom_right, wx), wy);
     }
   }
@@ -430,7 +462,10 @@ static void blit_row_scaled_a8(uint32_t *restrict dst, const uint8_t *top, const
                                uint32_t bottom_weight, uint32_t tint) {
   for (int i = 0; i < n; i++) {
     taps x = columns[i];
-    uint32_t top_left = top[x.first], top_right = top[x.second], bottom_left = bottom[x.first], bottom_right = bottom[x.second];
+    uint32_t top_left = top[x.first];
+    uint32_t top_right = top[x.second];
+    uint32_t bottom_left = bottom[x.first];
+    uint32_t bottom_right = bottom[x.second];
     // glyphs are mostly clear
     if ((top_left | top_right | bottom_left | bottom_right) == 0) continue;
     uint32_t top_a = top_left * (256 - x.weight) + top_right * x.weight;
@@ -450,29 +485,41 @@ void cr_blit(const uint8_t *src, int src_width, int src_height, int src_stride, 
   oy *= T.scale;
   if (dw <= 0 || dh <= 0 || sw == 0 || sh == 0 || src_width <= 0 || src_height <= 0) return;
   tint = premultiply(tint);
-  float cos_r = cosf(rotation * 0.01745329f), sin_r = sinf(rotation * 0.01745329f);
+  float cos_r = cosf(rotation * 0.01745329f);
+  float sin_r = sinf(rotation * 0.01745329f);
 
   // the pixels the rotated destination covers, clipped
-  float left = INFINITY, right = -INFINITY, top = INFINITY, bottom = -INFINITY;
+  float left = INFINITY;
+  float right = -INFINITY;
+  float top = INFINITY;
+  float bottom = -INFINITY;
   for (int corner = 0; corner < 4; corner++) {
-    float local_x = (corner & 1 ? dw : 0) - ox, local_y = (corner & 2 ? dh : 0) - oy;
-    float x = dx + local_x * cos_r - local_y * sin_r, y = dy + local_x * sin_r + local_y * cos_r;
+    float local_x = (corner & 1 ? dw : 0) - ox;
+    float local_y = (corner & 2 ? dh : 0) - oy;
+    float x = dx + local_x * cos_r - local_y * sin_r;
+    float y = dy + local_x * sin_r + local_y * cos_r;
     left = fminf(left, x);
     right = fmaxf(right, x);
     top = fminf(top, y);
     bottom = fmaxf(bottom, y);
   }
-  int x0 = MAX(first_pixel(left), T.x0), x1 = MIN(first_pixel(right), T.x1);
-  int y0 = MAX(first_pixel(top), T.y0), y1 = MIN(first_pixel(bottom), T.y1);
+  int x0 = MAX(first_pixel(left), T.x0);
+  int x1 = MIN(first_pixel(right), T.x1);
+  int y0 = MAX(first_pixel(top), T.y0);
+  int y1 = MIN(first_pixel(bottom), T.y1);
   if (x0 >= x1 || y0 >= y1) return;
 
   // a pixel at (x, y) from the destination's top left samples the source at u = u_base + x * u_dx + y * u_dy, and v alike
-  float u_scale = sw / dw, v_scale = sh / dh;
-  float u_dx = cos_r * u_scale, u_dy = sin_r * u_scale;
-  float v_dx = -sin_r * v_scale, v_dy = cos_r * v_scale;
+  float u_scale = sw / dw;
+  float v_scale = sh / dh;
+  float u_dx = cos_r * u_scale;
+  float u_dy = sin_r * u_scale;
+  float v_dx = -sin_r * v_scale;
+  float v_dy = cos_r * v_scale;
   float u_base = (sw < 0 ? sx - sw : sx) + ox * u_scale;
   float v_base = (sh < 0 ? sy - sh : sy) + oy * v_scale;
-  float u_end = sx + fabsf(sw), v_end = sy + fabsf(sh);
+  float u_end = sx + fabsf(sw);
+  float v_end = sy + fabsf(sh);
 
   if (rotation != 0) {
     for (int y = y0; y < y1; y++) {
@@ -511,7 +558,8 @@ void cr_blit(const uint8_t *src, int src_width, int src_height, int src_stride, 
     taps ty;
     if (!axis_taps(v_base + (y + 0.5f - dy) * v_dy, sy, v_end, src_height, bilinear, &ty)) continue;
     uint32_t *dst = row(y) + x0;
-    const uint8_t *top = src + (size_t)ty.first * src_stride, *bottom = src + (size_t)ty.second * src_stride;
+    const uint8_t *top = src + (size_t)ty.first * src_stride;
+    const uint8_t *bottom = src + (size_t)ty.second * src_stride;
     if (unscaled) {
       blit_row_unscaled(dst, top + (size_t)columns[0].first * (a8 ? 1 : 4), a8, n, tint);
     } else if (a8) {
@@ -550,7 +598,8 @@ typedef struct {
 } chroma_offsets;
 
 static inline chroma_offsets nv12_chroma(const uint8_t *pair, int saturation) {
-  int u = (pair[0] - 128) * saturation, v = (pair[1] - 128) * saturation;
+  int u = (pair[0] - 128) * saturation;
+  int v = (pair[1] - 128) * saturation;
   return (chroma_offsets){(409 * v) >> 16, -((100 * u + 208 * v) >> 16), (516 * u) >> 16};
 }
 
@@ -593,8 +642,10 @@ void cr_nv12(const uint8_t *y_plane, const uint8_t *uv_plane, int stride, int wi
   dy = to_y(dy);
   dw *= T.scale;
   dh *= T.scale;
-  int x0 = MAX(first_pixel(dx), T.x0), x1 = MIN(first_pixel(dx + dw), T.x1);
-  int y0 = MAX(first_pixel(dy), T.y0), y1 = MIN(first_pixel(dy + dh), T.y1);
+  int x0 = MAX(first_pixel(dx), T.x0);
+  int x1 = MIN(first_pixel(dx + dw), T.x1);
+  int y0 = MAX(first_pixel(dy), T.y0);
+  int y1 = MIN(first_pixel(dy + dh), T.y1);
   if (x0 >= x1 || y0 >= y1) return;
   const int n = x1 - x0;
 
@@ -635,7 +686,8 @@ void cr_nv12(const uint8_t *y_plane, const uint8_t *uv_plane, int stride, int wi
   }
   // when there are fewer pixels than frame columns between the first and last sampled, each pixel is converted. else the
   // frame row is, in whole chroma pairs, and sampled
-  int lo = MIN(columns[0], columns[n - 1]) & ~1, hi = MAX(columns[0], columns[n - 1]);
+  int lo = MIN(columns[0], columns[n - 1]) & ~1;
+  int hi = MAX(columns[0], columns[n - 1]);
   bool downscaled = n < hi - lo;
   uint32_t converted[downscaled ? 1 : hi + 2];
   int last_frame_row = -1;
@@ -645,7 +697,8 @@ void cr_nv12(const uint8_t *y_plane, const uint8_t *uv_plane, int stride, int wi
     if (frame_row == last_frame_row) {  // upscaled, the same frame row again
       memcpy(dst, row(y - 1) + x0, (size_t)n * 4);
     } else {
-      const uint8_t *luma = y_plane + (size_t)frame_row * stride, *chroma = uv_plane + (size_t)(frame_row / 2) * stride;
+      const uint8_t *luma = y_plane + (size_t)frame_row * stride;
+      const uint8_t *chroma = uv_plane + (size_t)(frame_row / 2) * stride;
       if (downscaled) {
         nv12_columns(dst, luma, chroma, columns, n, curve, params.saturation);
       } else {

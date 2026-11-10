@@ -8,10 +8,6 @@
 
 #if defined(GRAPHICS_API_OPENGL_SOFTWARE)
 
-#if !defined(PLATFORM_COMMA)
-static void ReturnScreenPixels(void) {}
-#endif
-
 // the texture rcpu draws into, until it changes
 static const sw_texture_t *targeted;
 
@@ -49,7 +45,9 @@ static uint32_t pack_color(const float *color) {
   return packed;
 }
 
-static bool is_gray_alpha(const sw_texture_t *tex) { return tex->format == SW_PIXELFORMAT_COLOR_GRAYALPHA; }
+static bool is_gray_alpha(const sw_texture_t *tex) {
+  return tex->format == SW_PIXELFORMAT_COLOR_GRAYALPHA;
+}
 
 static bool is_white(const sw_texture_t *tex, int x, int y) {
   const uint8_t *pixels = tex->pixels;
@@ -65,8 +63,10 @@ static bool is_white(const sw_texture_t *tex, int x, int y) {
 // default font: one with FLAG_MSAA_4X_HINT, else a few
 static bool samples_only_white(const sw_texture_t *tex, const sw_vertex_t *vertices, int count) {
   if (tex->format != SW_PIXELFORMAT_COLOR_R8G8B8A8 && !is_gray_alpha(tex)) return false;
-  float u_min = vertices[0].texcoord[0], u_max = u_min;
-  float v_min = vertices[0].texcoord[1], v_max = v_min;
+  float u_min = vertices[0].texcoord[0];
+  float u_max = u_min;
+  float v_min = vertices[0].texcoord[1];
+  float v_max = v_min;
   for (int i = 1; i < count; i++) {
     u_min = fminf(u_min, vertices[i].texcoord[0]);
     u_max = fmaxf(u_max, vertices[i].texcoord[0]);
@@ -74,8 +74,10 @@ static bool samples_only_white(const sw_texture_t *tex, const sw_vertex_t *verti
     v_max = fmaxf(v_max, vertices[i].texcoord[1]);
   }
   // the texels covered, with texcoords on a texel's edge rounded off it
-  int x0 = (int)floorf(u_min * tex->width + 1e-3f), x1 = (int)ceilf(u_max * tex->width - 1e-3f);
-  int y0 = (int)floorf(v_min * tex->height + 1e-3f), y1 = (int)ceilf(v_max * tex->height - 1e-3f);
+  int x0 = (int)floorf(u_min * tex->width + 1e-3f);
+  int x1 = (int)ceilf(u_max * tex->width - 1e-3f);
+  int y0 = (int)floorf(v_min * tex->height + 1e-3f);
+  int y1 = (int)ceilf(v_max * tex->height - 1e-3f);
   x1 = x1 > x0 ? x1 : x0 + 1;
   y1 = y1 > y0 ? y1 : y0 + 1;
   bool few = (x1 - x0) * (y1 - y0) <= 64;
@@ -100,7 +102,10 @@ typedef struct {
 
 static bool find_rect(const point *points, int count, rect_corners *rect) {
   if (count != 4) return false;
-  float left = points[0].x, right = left, top = points[0].y, bottom = top;
+  float left = points[0].x;
+  float right = left;
+  float top = points[0].y;
+  float bottom = top;
   for (int i = 1; i < 4; i++) {
     left = fminf(left, points[i].x);
     right = fmaxf(right, points[i].x);
@@ -148,7 +153,8 @@ static blit_source blit_sources[SW_MAX_TEXTURES];
 
 static int texture_slot(const sw_texture_t *tex) {
   const sw_pool_t *pool = &RLSW.texturePool;
-  const char *first = pool->data, *slot = (const char *)tex;
+  const char *first = pool->data;
+  const char *slot = (const char *)tex;
   bool in_pool = first && slot >= first && slot < first + (size_t)pool->capacity * pool->stride;
   return in_pool ? (int)((size_t)(slot - first) / pool->stride) : -1;
 }
@@ -156,7 +162,9 @@ static int texture_slot(const sw_texture_t *tex) {
 static void drop_masks(void);  // the alpha masks resampled from textures, see below
 
 static void cr_sw_texture_changed(const sw_texture_t *tex) {
+#if defined(PLATFORM_COMMA)
   if (tex == &RLSW.framebuffer.color) ReturnScreenPixels();
+#endif
   if (tex == targeted) {  // its pixels are going, until targeted again
     cr_target(NULL, 0, 0, 0);
     targeted = NULL;
@@ -190,7 +198,9 @@ static bool is_blittable(const sw_texture_t *tex) {
   }
 }
 
-static inline uint32_t opaque(uint32_t r, uint32_t g, uint32_t b) { return r | g << 8 | b << 16 | 0xffu << 24; }
+static inline uint32_t opaque(uint32_t r, uint32_t g, uint32_t b) {
+  return r | g << 8 | b << 16 | 0xffu << 24;
+}
 
 // the full size level, premultiplied
 static uint8_t *first_level(const sw_texture_t *tex, bool *a8) {
@@ -228,7 +238,8 @@ static uint8_t *first_level(const sw_texture_t *tex, bool *a8) {
   } else {
     uint32_t *colors = (uint32_t *)copy;
     for (size_t i = 0; i < count; i++) {
-      uint32_t gray = pixels[2 * i], a = pixels[2 * i + 1];
+      uint32_t gray = pixels[2 * i];
+      uint32_t a = pixels[2 * i + 1];
       colors[i] = gray | gray << 8 | gray << 16 | a << 24;
     }
     cr_premultiply(colors, colors, count);
@@ -241,7 +252,8 @@ static uint8_t *first_level(const sw_texture_t *tex, bool *a8) {
 static bool make_next_level(blit_source *source) {
   const blit_level *larger = &source->levels[source->level_count - 1];
   const int bytes = source->a8 ? 1 : 4;
-  const int width = larger->width > 1 ? larger->width / 2 : 1, height = larger->height > 1 ? larger->height / 2 : 1;
+  const int width = larger->width > 1 ? larger->width / 2 : 1;
+  const int height = larger->height > 1 ? larger->height / 2 : 1;
   uint8_t *pixels = malloc((size_t)width * height * bytes);
   if (!pixels) return false;
   for (int y = 0; y < height; y++) {
@@ -249,7 +261,8 @@ static bool make_next_level(blit_source *source) {
     const uint8_t *bottom = larger->height > 1 ? top + (size_t)larger->width * bytes : top;
     uint8_t *out = pixels + (size_t)y * width * bytes;
     for (int x = 0; x < width; x++) {
-      int left = 2 * x * bytes, right = larger->width > 1 ? left + bytes : left;
+      int left = 2 * x * bytes;
+      int right = larger->width > 1 ? left + bytes : left;
       for (int c = 0; c < bytes; c++) {
         out[x * bytes + c] = (uint8_t)((top[left + c] + top[right + c] + bottom[left + c] + bottom[right + c] + 2) >> 2);
       }
@@ -316,7 +329,9 @@ static struct {
   size_t bytes;
 } masks;
 
-static float mask_size(float size) { return roundf(size * MASK_SIZE_STEP) / MASK_SIZE_STEP; }
+static float mask_size(float size) {
+  return roundf(size * MASK_SIZE_STEP) / MASK_SIZE_STEP;
+}
 
 static void drop_masks(void) {
   for (int i = 0; i < MASK_SLOTS; i++) free(masks.slots[i].pixels);
@@ -340,8 +355,10 @@ static scaled_mask *find_mask(const mask_key *key) {
 
 // the key's source rectangle of the level drawn into a clear target at its phase, keeping the alpha
 static bool resample_mask(scaled_mask *mask, const mask_key *key, const blit_level *level) {
-  float x = (float)key->phase_x / MASK_PHASES, y = (float)key->phase_y / MASK_PHASES;
-  int width = (int)ceilf(x + key->width), height = (int)ceilf(y + key->height);
+  float x = (float)key->phase_x / MASK_PHASES;
+  float y = (float)key->phase_y / MASK_PHASES;
+  int width = (int)ceilf(x + key->width);
+  int height = (int)ceilf(y + key->height);
   size_t count = (size_t)width * height;
   uint32_t *drawn = calloc(count, 4);
   uint8_t *pixels = malloc(count);
@@ -365,8 +382,10 @@ static bool resample_mask(scaled_mask *mask, const mask_key *key, const blit_lev
 // the source rectangle of an alpha mask's level drawn scaled from (x, y), from its resampled copy. false when out of memory
 static bool draw_scaled_mask(int texture_slot, const blit_source *source, const blit_level *level, float src_x, float src_y,
                              float src_width, float src_height, float x, float y, float width, float height, uint32_t tint) {
-  float left = floorf(x), top = floorf(y);
-  int phase_x = (int)lroundf((x - left) * MASK_PHASES), phase_y = (int)lroundf((y - top) * MASK_PHASES);
+  float left = floorf(x);
+  float top = floorf(y);
+  int phase_x = (int)lroundf((x - left) * MASK_PHASES);
+  int phase_y = (int)lroundf((y - top) * MASK_PHASES);
   if (phase_x == MASK_PHASES) {
     phase_x = 0;
     left += 1.0f;
@@ -393,13 +412,18 @@ static bool draw_scaled_mask(int texture_slot, const blit_source *source, const 
   return true;
 }
 
-static float distance(point a, point b) { return hypotf(b.x - a.x, b.y - a.y); }
+static float distance(point a, point b) {
+  return hypotf(b.x - a.x, b.y - a.y);
+}
 
 // a textured quad as a blit, when it's a whole source rectangle drawn into a rectangle, rotated or mirrored.
 // clipped, it can have more vertices along the source's edges, and texcoords a little off them. false to leave it to rlsw
 static bool blit_quad(const sw_texture_t *tex, const sw_vertex_t *vertices, const point *points, int count, uint32_t tint) {
   if (count < 4) return false;
-  float u_min = vertices[0].texcoord[0], u_max = u_min, v_min = vertices[0].texcoord[1], v_max = v_min;
+  float u_min = vertices[0].texcoord[0];
+  float u_max = u_min;
+  float v_min = vertices[0].texcoord[1];
+  float v_max = v_min;
   for (int i = 1; i < count; i++) {
     u_min = fminf(u_min, vertices[i].texcoord[0]);
     u_max = fmaxf(u_max, vertices[i].texcoord[0]);
@@ -410,26 +434,36 @@ static bool blit_quad(const sw_texture_t *tex, const sw_vertex_t *vertices, cons
 
   // the vertices at the corners of the source: [v is max][u is max]. every vertex is on its edges, within a hundredth of
   // a texel, so with all four corners the polygon is the whole source
-  const float u_slack = 0.01f / tex->width, v_slack = 0.01f / tex->height;
+  const float u_slack = 0.01f / tex->width;
+  const float v_slack = 0.01f / tex->height;
   int at[2][2] = {{-1, -1}, {-1, -1}};
   for (int i = 0; i < count; i++) {
-    float u = vertices[i].texcoord[0], v = vertices[i].texcoord[1];
-    bool u_is_min = u - u_min <= u_slack, u_is_max = u_max - u <= u_slack;
-    bool v_is_min = v - v_min <= v_slack, v_is_max = v_max - v <= v_slack;
-    bool on_u_edge = u_is_min || u_is_max, on_v_edge = v_is_min || v_is_max;
+    float u = vertices[i].texcoord[0];
+    float v = vertices[i].texcoord[1];
+    bool u_is_min = u - u_min <= u_slack;
+    bool u_is_max = u_max - u <= u_slack;
+    bool v_is_min = v - v_min <= v_slack;
+    bool v_is_max = v_max - v <= v_slack;
+    bool on_u_edge = u_is_min || u_is_max;
+    bool on_v_edge = v_is_min || v_is_max;
     if (!on_u_edge && !on_v_edge) return false;
     if (on_u_edge && on_v_edge) at[v_is_max][u_is_max] = i;
   }
   for (int corner = 0; corner < 4; corner++) {
     if (at[corner >> 1][corner & 1] < 0) return false;
   }
-  point source_top_left = points[at[0][0]], source_top_right = points[at[0][1]];
-  point source_bottom_left = points[at[1][0]], source_bottom_right = points[at[1][1]];
+  point source_top_left = points[at[0][0]];
+  point source_top_right = points[at[0][1]];
+  point source_bottom_left = points[at[1][0]];
+  point source_bottom_right = points[at[1][1]];
 
   // the source's axes on the screen must be perpendicular, and make a parallelogram
-  float ux = source_top_right.x - source_top_left.x, uy = source_top_right.y - source_top_left.y;
-  float vx = source_bottom_left.x - source_top_left.x, vy = source_bottom_left.y - source_top_left.y;
-  float width = distance(source_top_left, source_top_right), height = distance(source_top_left, source_bottom_left);
+  float ux = source_top_right.x - source_top_left.x;
+  float uy = source_top_right.y - source_top_left.y;
+  float vx = source_bottom_left.x - source_top_left.x;
+  float vy = source_bottom_left.y - source_top_left.y;
+  float width = distance(source_top_left, source_top_right);
+  float height = distance(source_top_left, source_bottom_left);
   if (width == 0 || height == 0) return false;
   bool perpendicular = fabsf(ux * vx + uy * vy) <= 1e-3f * width * height;
   bool parallelogram = fabsf(source_top_left.x + ux + vx - source_bottom_right.x) < 1e-2f &&
@@ -440,8 +474,10 @@ static bool blit_quad(const sw_texture_t *tex, const sw_vertex_t *vertices, cons
   bool mirrored = ux * vy - uy * vx < 0;
   point origin = mirrored ? source_top_right : source_top_left;
   float rotation = mirrored ? atan2f(-uy, -ux) : atan2f(uy, ux);
-  float src_x = u_min * tex->width, src_y = v_min * tex->height;
-  float src_width = (u_max - u_min) * tex->width, src_height = (v_max - v_min) * tex->height;
+  float src_x = u_min * tex->width;
+  float src_y = v_min * tex->height;
+  float src_width = (u_max - u_min) * tex->width;
+  float src_height = (v_max - v_min) * tex->height;
 
   // drawn unscaled onto whole pixels, each pixel center samples a texel center: filtering would only cost time
   bool on_pixels = fabsf(origin.x - roundf(origin.x)) < 1e-3f && fabsf(origin.y - roundf(origin.y)) < 1e-3f;
@@ -453,7 +489,8 @@ static bool blit_quad(const sw_texture_t *tex, const sw_vertex_t *vertices, cons
   blit_source *source = get_blit_source(tex);
   if (!source) return false;
   const blit_level *level = bilinear ? get_level(source, fminf(src_width / width, src_height / height)) : &source->levels[0];
-  float level_x = (float)level->width / tex->width, level_y = (float)level->height / tex->height;
+  float level_x = (float)level->width / tex->width;
+  float level_y = (float)level->height / tex->height;
   src_x *= level_x;
   src_y *= level_y;
   src_width *= level_x;
@@ -534,6 +571,11 @@ int cr_raylib_screen(uint8_t **pixels, int *width, int *height) {
 }
 
 #else
-int cr_target_raylib(void) { return -ENODEV; }
-int cr_raylib_screen(uint8_t **pixels, int *width, int *height) { return -ENODEV; }
+int cr_target_raylib(void) {
+  return -ENODEV;
+}
+
+int cr_raylib_screen(uint8_t **pixels, int *width, int *height) {
+  return -ENODEV;
+}
 #endif
