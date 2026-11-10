@@ -610,6 +610,9 @@ struct mg_gamepad {
 #ifdef MG_LINUX
 #include <linux/input.h>
 #include <linux/input-event-codes.h>
+#ifndef ABS_PROFILE
+#define ABS_PROFILE 0x21  /* from linux 6.1, newer than manylinux_2_28's headers */
+#endif
 
 struct mg_gamepads_src {
     int inotify, watch;
