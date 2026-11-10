@@ -886,7 +886,8 @@ void mg_gamepads_free(mg_gamepads* gamepads) {
 
     mg_gamepads_free_platform(gamepads);
 
-    for (cur = gamepads->list.cur; cur != NULL; cur = cur->prev) {
+    /* releasing moves a gamepad to the free list, so take the list's last each time */
+    while ((cur = gamepads->list.cur) != NULL) {
         mg_gamepad_release(gamepads, cur);
     }
     MG_MEMSET(gamepads, 0, sizeof(mg_gamepads));
