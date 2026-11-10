@@ -93,25 +93,26 @@ class TestCpu(unittest.TestCase):
     if not cpu.software:
       self.skipTest("raylib draws with the GPU")
     rl.init_window(4, 2, "rcpu screen")
+    red, white, black = [255, 0, 0, 255], [255, 255, 255, 255], [0, 0, 0, 255]
     try:
       rl.begin_drawing()
       rl.clear_background(rl.BLACK)
-      rl.draw_rectangle(0, 0, 4, 1, rl.Color(255, 0, 0, 255))
+      height, width = cpu.screen().shape[:2]  # a comma device's screen is its display's
+      rl.draw_rectangle(0, 0, width, 1, rl.Color(*red))
       # rows are bottom up, like GL's: the top row is last
       screen = cpu.screen()
-      self.assertEqual(screen.shape, (2, 4, 4))
-      self.assertEqual(screen[1].tolist(), [[255, 0, 0, 255]] * 4)
-      self.assertEqual(screen[0].tolist(), [[0, 0, 0, 255]] * 4)
+      self.assertTrue((screen[-1] == red).all())
+      self.assertTrue((screen[0] == black).all())
       # and it's the screen, to draw on
       screen[0] = 255
-      self.assertEqual(cpu.screen()[0].tolist(), [[255, 255, 255, 255]] * 4)
-      rl.end_drawing()
-      # raylib's own readback is RGBA and top down, like GL's
+      self.assertTrue((cpu.screen()[0] == white).all())
+      # raylib's own readback is RGBA and top down, like GL's. before presenting, as a comma device shows the screen itself
       image = rl.load_image_from_screen()
-      pixels = np.frombuffer(image.to_bytes(4 * 2 * 4), np.uint8).reshape(2, 4, 4)
+      pixels = np.frombuffer(image.to_bytes(width * height * 4), np.uint8).reshape(height, width, 4)
       rl.unload_image(image)
-      self.assertEqual(pixels[0].tolist(), [[255, 0, 0, 255]] * 4)
-      self.assertEqual(pixels[1].tolist(), [[255, 255, 255, 255]] * 4)
+      self.assertTrue((pixels[0] == red).all())
+      self.assertTrue((pixels[-1] == white).all())
+      rl.end_drawing()
     finally:
       rl.close_window()
 
