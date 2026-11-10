@@ -40,11 +40,12 @@ def backends():
 def libraries(backend):
     if SYSTEM == "Darwin":
         return []
+    # every backend draws on the CPU. desktop's RGFW still links GL for its window, though nothing draws with it
     if backend == "desktop":
-        return ["GL", "X11", "m", "pthread", "dl", "rt"]
-    if backend == "comma":  # draws on the CPU
+        return ["GL", "X11", "Xrandr", "m", "pthread", "dl", "rt"]
+    if backend == "comma":
         return ["drm", "m", "pthread", "dl", "rt"]
-    return ["m", "pthread", "dl", "rt"]  # headless draws on the CPU too
+    return ["m", "pthread", "dl", "rt"]
 
 
 class BuildBindings(build_ext):
@@ -79,7 +80,7 @@ class BuildBindings(build_ext):
             shutil.copytree(
                 ROOT / "src", source, ignore=shutil.ignore_patterns("*.o", "*.a", "*.so", "*.dylib", "*.dll")
             )
-            target = {"desktop": "PLATFORM_DESKTOP", "headless": "PLATFORM_HEADLESS", "comma": "PLATFORM_COMMA"}[
+            target = {"desktop": "PLATFORM_DESKTOP_RGFW", "headless": "PLATFORM_HEADLESS", "comma": "PLATFORM_COMMA"}[
                 backend
             ]
             flags = ["-fPIC", "-fvisibility=hidden"]
@@ -102,12 +103,13 @@ class BuildBindings(build_ext):
                 "make",
                 f"-j{jobs}",
                 f"PLATFORM={target}",
+                "GRAPHICS=GRAPHICS_API_OPENGL_SOFTWARE",
                 f"CC={os.getenv('CC', 'cc')}",
                 f"CUSTOM_CFLAGS={shlex.join(flags)}",
             ]
             archive = directory / f"libraylib_{backend}.a"
             if SYSTEM == "Darwin":
-                objects = ["rcore.o", "rshapes.o", "rtextures.o", "rtext.o", "rmodels.o", "raudio.o", "rglfw.o", "rcpu.o"]
+                objects = ["rcore.o", "rshapes.o", "rtextures.o", "rtext.o", "rmodels.o", "raudio.o", "rcpu.o"]
                 subprocess.run(command + objects, cwd=source, check=True)
                 subprocess.run(["libtool", "-static", "-o", str(archive), *objects], cwd=source, check=True)
             else:
