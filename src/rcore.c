@@ -1120,8 +1120,9 @@ void BeginScissorMode(int x, int y, int width, int height)
 #if defined(__APPLE__)
     if (!CORE.Window.usingFbo)
     {
-        Vector2 scale = GetWindowScaleDPI();
-        rlScissor((int)(x*scale.x), (int)(GetScreenHeight()*scale.y - (((y + height)*scale.y))), (int)(width*scale.x), (int)(height*scale.y));
+        // the framebuffer's pixels per screen point, which the monitor's DPI scale needn't be
+        Vector2 scale = { (float)CORE.Window.currentFbo.width/CORE.Window.screen.width, (float)CORE.Window.currentFbo.height/CORE.Window.screen.height };
+        rlScissor((int)(x*scale.x), (int)(CORE.Window.currentFbo.height - (y + height)*scale.y), (int)(width*scale.x), (int)(height*scale.y));
     }
 #else
     if (!CORE.Window.usingFbo && FLAG_IS_SET(CORE.Window.flags, FLAG_WINDOW_HIGHDPI))
