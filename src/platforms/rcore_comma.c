@@ -58,14 +58,6 @@
 
 #include <linux/input.h>
 
-#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
-#include <EGL/egl.h>
-#include <EGL/eglplatform.h>
-
-#include <GLES2/gl2.h>
-
-#include <gbm.h>
-#endif
 
 #include <xf86drm.h>
 #include <xf86drmMode.h>
@@ -93,14 +85,6 @@ struct touch {
   int fd;
 };
 
-#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
-// hold all the low level egl stuff
-struct egl_platform {
-  EGLDisplay display;
-  EGLSurface surface;
-  EGLContext context;
-};
-#endif
 
 // hold all the low level drm stuff
 struct drm_platform {
@@ -115,27 +99,10 @@ struct drm_platform {
   drmModeModeInfo mode;
 };
 
-#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
-// hold all the low level gbm stuff
-struct gbm_platform {
-  struct gbm_device *device;
-  struct gbm_surface *surface;
-  struct gbm_bo *current_bo;
-  struct gbm_bo *next_bo;
-  uint32_t current_fb;
-  uint32_t next_fb;
-};
-#endif
 
 typedef struct {
-#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
-    struct egl_platform egl;
-#endif
     struct touch touch;
     struct drm_platform drm;
-#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
-    struct gbm_platform gbm;
-#endif
     bool canonical_zero;
     bool debug_mode;
 } PlatformData;
@@ -151,29 +118,6 @@ static PlatformData platform = { .drm = { .fd = -1, .render_fd = -1, .socket_fd 
 // comma specific code
 //----------------------------------------------------------------------------------
 
-#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
-#define CASE_STR( value ) case value: return #value;
-const char *eglGetErrorString(EGLint error) {
-    switch(error) {
-      CASE_STR( EGL_SUCCESS             )
-      CASE_STR( EGL_NOT_INITIALIZED     )
-      CASE_STR( EGL_BAD_ACCESS          )
-      CASE_STR( EGL_BAD_ALLOC           )
-      CASE_STR( EGL_BAD_ATTRIBUTE       )
-      CASE_STR( EGL_BAD_CONTEXT         )
-      CASE_STR( EGL_BAD_CONFIG          )
-      CASE_STR( EGL_BAD_CURRENT_SURFACE )
-      CASE_STR( EGL_BAD_DISPLAY         )
-      CASE_STR( EGL_BAD_SURFACE         )
-      CASE_STR( EGL_BAD_MATCH           )
-      CASE_STR( EGL_BAD_PARAMETER       )
-      CASE_STR( EGL_BAD_NATIVE_PIXMAP   )
-      CASE_STR( EGL_BAD_NATIVE_WINDOW   )
-      CASE_STR( EGL_CONTEXT_LOST        )
-      default: return "Unknown";
-    }
-}
-#endif
 #undef CASE_STR
 
 // These are actually float16s, so need to be converted before use
@@ -183,29 +127,6 @@ struct __attribute__((__packed__)) color_correction_values {
   uint16_t rgb_color_gains[3];
 };
 
-#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
-static const char *color_correction_fragment_shader_template =
-    "#version 100\n"
-    "precision mediump float;\n"
-    "varying vec2 fragTexCoord;\n"
-    "varying vec4 fragColor;\n"
-    "uniform sampler2D texture0;\n"
-    "uniform vec4 colDiffuse;\n"
-    "void main() {\n"
-    "    vec4 c = texture2D(texture0, fragTexCoord) * fragColor * colDiffuse;\n"
-    "    c.rgb = pow(c.rgb, vec3(2.2, 2.2, 2.2));\n"
-    "    c.r *= %f;\n"
-    "    c.g *= %f;\n"
-    "    c.b *= %f;\n"
-    "    vec3 rgb_cc = vec3(0.0, 0.0, 0.0);\n"
-    "    rgb_cc += c.r * vec3(%f, %f, %f);\n"
-    "    rgb_cc += c.g * vec3(%f, %f, %f);\n"
-    "    rgb_cc += c.b * vec3(%f, %f, %f);\n"
-    "    c.rgb = rgb_cc;\n"
-    "    c.rgb = pow(c.rgb, vec3(%f/2.2, %f/2.2, %f/2.2));\n"
-    "    gl_FragColor = c;\n"
-    "}\n";
-#endif
 
 float decode_float16(uint16_t value){
   uint32_t sign = value >> 15;
@@ -288,64 +209,6 @@ err:
   return NULL;
 }
 
-#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
-static int init_color_correction(void) {
-  int ret;
-  char *shader = NULL;
-  struct color_correction_values *ccv = NULL;
-
-  if (platform.canonical_zero) {
-    return 0;
-  }
-
-  shader = malloc(1024);
-  if(shader == NULL){
-    TRACELOG(LOG_WARNING, "COMMA: Failed to malloc color correction");
-    goto err;
-  }
-
-  ccv = read_correction_values();
-  if(ccv == NULL){
-    TRACELOG(LOG_INFO, "COMMA: No color correction values found");
-    goto err;
-  }
-
-  ret = sprintf(shader,
-    color_correction_fragment_shader_template,
-    (1.0/decode_float16(ccv->rgb_color_gains[0])),
-    (1.0/decode_float16(ccv->rgb_color_gains[1])),
-    (1.0/decode_float16(ccv->rgb_color_gains[2])),
-    decode_float16(ccv->ccm[0]),
-    decode_float16(ccv->ccm[1]),
-    decode_float16(ccv->ccm[2]),
-    decode_float16(ccv->ccm[3]),
-    decode_float16(ccv->ccm[4]),
-    decode_float16(ccv->ccm[5]),
-    decode_float16(ccv->ccm[6]),
-    decode_float16(ccv->ccm[7]),
-    decode_float16(ccv->ccm[8]),
-    (1.0/decode_float16(ccv->gamma)),
-    (1.0/decode_float16(ccv->gamma)),
-    (1.0/decode_float16(ccv->gamma))
-  );
-
-  if(ret < 0){
-    TRACELOG(LOG_WARNING, "COMMA: Color correction sprintf failed");
-    goto err;
-  }
-
-  TRACELOG(LOG_INFO, "COMMA: Successfully setup color correction");
-  free(ccv);
-
-  CORE.Window.color_correction_shader_src = shader;
-  return 0;
-
-err:
-  if (ccv != NULL) free(ccv);
-  if (shader != NULL) free(shader);
-  return -1;
-}
-#else
 #include "rcore_comma_display.c"
 
 // the blobs of the display's degamma, matrix and gamma blocks, as msm_drm_pp.h's drm_msm_igc_lut, drm_msm_pcc and
@@ -371,7 +234,7 @@ typedef struct {
   uint32_t lut[3][512];  // per channel, two 10 bit entries per word
 } gc_blob;
 
-// the color calibration in the display's own degamma, matrix and gamma blocks, as the GL path's shader does it
+// the display's color calibration, in its own degamma, matrix and gamma blocks
 static void set_color_correction(bool enable) {
   static const char *names[3] = {"SDE_DSPP_IGC_V3", "SDE_DSPP_PCC_V4", "SDE_DSPP_GC_V1"};
   static igc_blob igc;
@@ -416,7 +279,6 @@ static void set_color_correction(bool enable) {
     if (ret) TRACELOG(LOG_WARNING, "COMMA: Failed to set %s: %s", names[i], strerror(-ret));
   }
 }
-#endif
 
 static int recv_fd(int sock) {
   struct msghdr msg = {0};
@@ -528,135 +390,6 @@ static int init_drm (const char *dev_path) {
   return 0;
 }
 
-#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
-static int init_egl () {
-   EGLint major;
-   EGLint minor;
-   EGLConfig config = NULL;
-   EGLint num_config;
-   EGLint frame_buffer_config [] = {
-     EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
-     EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
-     EGL_RED_SIZE,   8,
-     EGL_GREEN_SIZE, 8,
-     EGL_BLUE_SIZE,  8,
-     EGL_DEPTH_SIZE, 24,
-     EGL_NONE
-   };
-   // ask for an OpenGL ES 2 rendering context
-   EGLint context_config [] = { EGL_CONTEXT_MAJOR_VERSION, 2, EGL_NONE, EGL_NONE };
-
-   platform.gbm.device = gbm_create_device(platform.drm.render_fd);
-   if (!platform.gbm.device) {
-     TRACELOG(LOG_WARNING, "COMMA: Failed to create gbm device");
-     return -1;
-   }
-
-   platform.egl.display = eglGetDisplay(platform.gbm.device);
-   if (platform.egl.display == EGL_NO_DISPLAY) {
-     TRACELOG(LOG_WARNING, "COMMA: Failed to get an EGL display");
-     return -1;
-   }
-
-   if (!eglInitialize(platform.egl.display, &major, &minor)) {
-     TRACELOG(LOG_WARNING, "COMMA: Failed to initialize the EGL display. Error code: %s", eglGetErrorString(eglGetError()));
-     return -1;
-   }
-   TRACELOG(LOG_INFO, "COMMA: Using EGL version %i.%i", major, minor);
-
-   if (!eglGetConfigs(platform.egl.display, NULL, 0, &num_config) || num_config < 1) {
-     TRACELOG(LOG_WARNING, "COMMA: Failed to list EGL display configs. Error code: %s", eglGetErrorString(eglGetError()));
-     return -1;
-   }
-
-   EGLConfig *configs = malloc(num_config * sizeof(EGLConfig));
-   if (!eglChooseConfig(platform.egl.display, frame_buffer_config, configs, num_config, &num_config)) {
-     TRACELOG(LOG_WARNING, "%s", eglGetErrorString(eglGetError()));
-     return -1;
-   }
-   if (num_config == 0) {
-     TRACELOG(LOG_WARNING, "%s", eglGetErrorString(eglGetError()));
-     return -1;
-   }
-
-   for (int i = 0; i < num_config; ++i) {
-     EGLint gbm_format;
-     if (!eglGetConfigAttrib(platform.egl.display, configs[i], EGL_NATIVE_VISUAL_ID, &gbm_format)) {
-       continue;
-     }
-
-     if (gbm_format == GBM_FORMAT_ABGR8888) {
-       config = configs[i];
-       free(configs);
-       break;
-     }
-   }
-
-   if (config == NULL) {
-     TRACELOG(LOG_WARNING, "COMMA: Failed to find correct config");
-     return -1;
-   }
-
-   platform.gbm.surface = gbm_surface_create(platform.gbm.device, platform.drm.mode.hdisplay, platform.drm.mode.vdisplay, GBM_FORMAT_ABGR8888, GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
-   if (!platform.gbm.surface) {
-     TRACELOG(LOG_WARNING, "COMMA: Failed to create gbm surface");
-     return -1;
-   }
-
-   platform.egl.surface = eglCreateWindowSurface(platform.egl.display, config, (EGLNativeWindowType)platform.gbm.surface, NULL);
-   if (platform.egl.surface == EGL_NO_SURFACE) {
-     TRACELOG(LOG_WARNING, "COMMA: Failed to create an EGL surface. Error code: %s", eglGetErrorString(eglGetError()));
-     return -1;
-   }
-
-   platform.egl.context = eglCreateContext(platform.egl.display, config, EGL_NO_CONTEXT, context_config);
-   if (platform.egl.context == EGL_NO_CONTEXT) {
-     TRACELOG(LOG_WARNING, "COMMA: Failed to create an OpenGL ES context. Error code: %s", eglGetErrorString(eglGetError()));
-     return -1;
-   }
-
-   if (!eglMakeCurrent(platform.egl.display, platform.egl.surface, platform.egl.surface, platform.egl.context)) {
-     TRACELOG(LOG_WARNING, "COMMA: Failed to attach the OpenGL ES context to the EGL surface. Error code: %s", eglGetErrorString(eglGetError()));
-     return -1;
-   }
-
-   // >1 is not supported
-   if (!eglSwapInterval(platform.egl.display, (CORE.Window.flags & FLAG_VSYNC_HINT) ? 1 : 0)) {
-     TRACELOG(LOG_WARNING, "COMMA: eglSwapInterval failed. Error code: %s", eglGetErrorString(eglGetError()));
-     return -1;
-   }
-
-   return 0;
-}
-
-static int get_or_create_fb_for_bo(struct gbm_bo *bo, uint32_t *out_fb) {
-    void *user_data = gbm_bo_get_user_data(bo);
-    if (user_data) {
-      *out_fb = (uint32_t)(uintptr_t)user_data;
-      return 0;
-    }
-
-    uint32_t w = gbm_bo_get_width(bo);
-    uint32_t h = gbm_bo_get_height(bo);
-    uint32_t stride = gbm_bo_get_stride(bo);
-    uint32_t handle = gbm_bo_get_handle(bo).u32;
-
-    uint32_t handles[4] = { handle };
-    uint32_t pitches[4] = { stride };
-    uint32_t offsets[4] = { 0 };
-    uint32_t fb_id = 0;
-
-    if (drmModeAddFB2(platform.drm.render_fd, w, h, GBM_FORMAT_ABGR8888, handles, pitches, offsets, &fb_id, 0) != 0) {
-      return -1;
-    }
-
-    // no RmFB on destroy: removing the fb on screen turns off the display. the kernel frees fbs when render_fd is closed
-    gbm_bo_set_user_data(bo, (void*)(uintptr_t)fb_id, NULL);
-
-    *out_fb = fb_id;
-    return 0;
-}
-#endif
 
 static FILE* open_with_retry(const char *path, const char *mode) {
   const int sleep_ms = 50;
@@ -720,36 +453,6 @@ static void check_crtc(void) {
   drmModeFreeCrtc(crtc);
 }
 
-#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
-static int init_screen () {
-  CORE.Window.rotation_angle = platform.canonical_zero ? 270 : 90;
-  CORE.Window.rotation_source = (Rectangle){0.0, 0.0, CORE.Window.screen.width, -((int)CORE.Window.screen.height)};
-  CORE.Window.rotation_destination = (Rectangle){CORE.Window.screen.height/2, CORE.Window.screen.width/2, CORE.Window.screen.width, CORE.Window.screen.height};
-  CORE.Window.rotation_origin = (Vector2){CORE.Window.screen.width/2, CORE.Window.screen.height/2};
-
-  eglSwapBuffers(platform.egl.display, platform.egl.surface);
-
-  platform.gbm.current_bo = gbm_surface_lock_front_buffer(platform.gbm.surface);
-  if (!platform.gbm.current_bo) {
-    TRACELOG(LOG_WARNING, "COMMA: Failed to get initial front buffer object");
-    return -1;
-  }
-
-  if (get_or_create_fb_for_bo(platform.gbm.current_bo, &platform.gbm.current_fb)) {
-    TRACELOG(LOG_WARNING, "COMMA: Failed to get initial frame buffer");
-    return -1;
-  }
-
-  check_crtc();
-
-  if (turn_screen_on()) {
-    TRACELOG(LOG_WARNING, "COMMA: Failed to turn screen on");
-    return -1;
-  }
-
-  return 0;
-}
-#else
 static int init_screen(void) {
   int ret = display_init();
   if (ret) {
@@ -759,7 +462,6 @@ static int init_screen(void) {
   check_crtc();
   return turn_screen_on();
 }
-#endif
 
 static int init_touch(const char *dev_path) {
   platform.touch.fd = open(dev_path, O_RDONLY|O_NONBLOCK);
@@ -1061,37 +763,6 @@ static bool present_framebuffer(uint32_t framebuffer) {
 }
 
 // Swap back buffer with front buffer (screen drawing)
-#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
-void SwapScreenBuffer(void) {
-  eglSwapBuffers(platform.egl.display, platform.egl.surface);
-
-  platform.gbm.next_bo = gbm_surface_lock_front_buffer(platform.gbm.surface);
-  if (!platform.gbm.next_bo) {
-    TRACELOG(LOG_WARNING, "COMMA: Failed to get rendered buffer object");
-    return;
-  }
-
-  if (get_or_create_fb_for_bo(platform.gbm.next_bo, &platform.gbm.next_fb)) {
-    gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
-    platform.gbm.next_bo = NULL;
-    TRACELOG(LOG_WARNING, "COMMA: Failed to get frame buffer for rendered buffer object");
-    return;
-  }
-
-  if (!present_framebuffer(platform.gbm.next_fb)) {
-    gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
-    platform.gbm.next_bo = NULL;
-    platform.gbm.next_fb = 0;
-    return;
-  }
-
-  if (platform.gbm.current_bo) {
-    gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.current_bo);
-  }
-
-  platform.gbm.current_bo = platform.gbm.next_bo;
-}
-#else
 // rlsw's own framebuffer pixels, while it draws straight into the display's target instead
 static void *rlsw_pixels;
 // the CRTC only takes color correction once it shows a frame
@@ -1131,7 +802,6 @@ static void ReturnScreenPixels(void) {
   RLSW.framebuffer.color.pixels = rlsw_pixels;
   rlsw_pixels = NULL;
 }
-#endif
 
 //----------------------------------------------------------------------------------
 // Module Functions Definition: Misc
@@ -1275,26 +945,14 @@ int InitPlatform(void) {
   CORE.Window.display.width = CORE.Window.screen.width;
   CORE.Window.display.height = CORE.Window.screen.height;
 
-#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
-  // swapped since we render in landscape mode
-  CORE.Window.currentFbo.width = CORE.Window.screen.height;
-  CORE.Window.currentFbo.height = CORE.Window.screen.width;
-#else
   // drawn in landscape, the display's rotator turns it to the panel
   CORE.Window.currentFbo.width = CORE.Window.screen.width;
   CORE.Window.currentFbo.height = CORE.Window.screen.height;
-#endif
   CORE.Window.render.width = CORE.Window.currentFbo.width;
   CORE.Window.render.height = CORE.Window.currentFbo.height;
   CORE.Window.renderOffset.x = 0;
   CORE.Window.renderOffset.y = 0;
 
-#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
-  if (init_egl()) {
-    TRACELOG(LOG_FATAL, "COMMA: Failed to initialize EGL");
-    return -1;
-  }
-#endif
 
   if (init_touch("/dev/input/event2")) {
     TRACELOG(LOG_FATAL, "COMMA: Failed to initialize touch device");
@@ -1306,18 +964,10 @@ int InitPlatform(void) {
     return -1;
   }
 
-#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
-  if (init_color_correction()) {
-    TRACELOG(LOG_WARNING, "COMMA: Failed to initialize color correction");
-  }
-#endif
 
   const char *d = getenv("MAGIC_DEBUG");
   platform.debug_mode = (d && d[0] == '1');
 
-#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
-  rlLoadExtensions(eglGetProcAddress);
-#endif
   InitTimer();
   CORE.Storage.basePath = GetWorkingDirectory();
 
@@ -1330,47 +980,11 @@ int InitPlatform(void) {
 void ClosePlatform(void) {
   CORE.Window.ready = false;
 
-#if defined(GRAPHICS_API_OPENGL_SOFTWARE)
   if (platform.drm.fd >= 0) {
     set_color_correction(false);
     color_corrected = false;
     display_close();
   }
-#else
-  if (platform.egl.display != EGL_NO_DISPLAY) {
-    eglMakeCurrent(platform.egl.display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-
-    if (platform.egl.surface != EGL_NO_SURFACE) {
-      eglDestroySurface(platform.egl.display, platform.egl.surface);
-      platform.egl.surface = EGL_NO_SURFACE;
-    }
-    if (platform.egl.context != EGL_NO_CONTEXT) {
-      eglDestroyContext(platform.egl.display, platform.egl.context);
-      platform.egl.context = EGL_NO_CONTEXT;
-    }
-    eglTerminate(platform.egl.display);
-    platform.egl.display = EGL_NO_DISPLAY;
-  }
-
-  if (platform.gbm.surface && platform.gbm.current_bo && platform.gbm.current_bo != platform.gbm.next_bo) {
-    gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.current_bo);
-  }
-  if (platform.gbm.surface && platform.gbm.next_bo) {
-    gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
-  }
-
-  if (platform.gbm.surface) {
-    gbm_surface_destroy(platform.gbm.surface);
-    platform.gbm.surface = NULL;
-    platform.gbm.next_bo = NULL;
-    platform.gbm.current_bo = NULL;
-  }
-
-  if (platform.gbm.device) {
-    gbm_device_destroy(platform.gbm.device);
-    platform.gbm.device = NULL;
-  }
-#endif
 
   if (platform.drm.render_fd >= 0) close(platform.drm.render_fd);
   if (platform.drm.fd >= 0) close(platform.drm.fd);
@@ -1379,7 +993,4 @@ void ClosePlatform(void) {
   close(platform.touch.fd);
   platform.touch.fd = -1;
   platform.drm.needs_modeset = true;
-#if !defined(GRAPHICS_API_OPENGL_SOFTWARE)
-  platform.gbm.current_fb = platform.gbm.next_fb = 0;
-#endif
 }

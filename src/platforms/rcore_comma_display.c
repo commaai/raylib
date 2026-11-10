@@ -77,7 +77,7 @@ static void ion_free(ion_buffer *buffer) {
 }
 
 static void display_close(void) {
-  // the framebuffers go with the platform's DRM fd, like the GL path's
+  // the framebuffers go with the platform's DRM fd
   for (int i = 0; i < 2; i++) ion_free(&display.panel[i]);
   ion_free(&display.target);
   if (display.rotator_fd >= 0) close(display.rotator_fd);
