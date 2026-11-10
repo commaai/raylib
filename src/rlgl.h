@@ -3809,8 +3809,16 @@ unsigned char *rlReadScreenPixels(int width, int height)
     glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, imgData);
 
 #if defined(GRAPHICS_API_OPENGL_SOFTWARE)
-    // rlsw reads out top down already, so only drop the alpha
-    for (int i = 3; i < width*height*4; i += 4) imgData[i] = 255;
+    // rlsw reads out top down already, and BGRA for a window to show unless told otherwise: make it RGBA, opaque
+    for (int i = 0; i < width*height*4; i += 4)
+    {
+    #if SW_FRAMEBUFFER_OUTPUT_BGRA
+        unsigned char blue = imgData[i];
+        imgData[i] = imgData[i + 2];
+        imgData[i + 2] = blue;
+    #endif
+        imgData[i + 3] = 255;
+    }
 #else
     // Flip image vertically
     // NOTE: Alpha value has already been applied to RGB in framebuffer, not needed anymore
