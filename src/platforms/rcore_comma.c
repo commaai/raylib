@@ -118,8 +118,6 @@ static PlatformData platform = { .drm = { .fd = -1, .render_fd = -1, .socket_fd 
 // comma specific code
 //----------------------------------------------------------------------------------
 
-#undef CASE_STR
-
 // These are actually float16s, so need to be converted before use
 struct __attribute__((__packed__)) color_correction_values {
   uint16_t gamma;

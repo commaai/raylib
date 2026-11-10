@@ -82,16 +82,7 @@ class TestCpu(unittest.TestCase):
     with self.assertRaises(TypeError):
       cpu.triangles(np.zeros(6, np.float64), np.zeros(1, np.uint32), cpu.TRIANGLE_LIST)
 
-  def test_no_target_without_software_renderer(self):
-    if not cpu.software:
-      with self.assertRaises(RuntimeError):
-        cpu.target_raylib()
-      with self.assertRaises(RuntimeError):
-        cpu.screen()
-
   def test_screen_is_what_raylib_drew(self):
-    if not cpu.software:
-      self.skipTest("raylib draws with the GPU")
     rl.init_window(4, 2, "rcpu screen")
     red, white, black = [255, 0, 0, 255], [255, 255, 255, 255], [0, 0, 0, 255]
     try:
