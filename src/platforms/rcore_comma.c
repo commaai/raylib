@@ -981,7 +981,7 @@ void ClosePlatform(void) {
   CORE.Window.ready = false;
 
   if (platform.drm.fd >= 0) {
-    set_color_correction(false);
+    // Calibration belongs to the shared display, including magic after this client exits.
     color_corrected = false;
     display_close();
   }
