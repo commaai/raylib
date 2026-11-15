@@ -5,6 +5,9 @@
 // included by rcore.c, after rlsw and the platform, as rlsw calls its hooks with its own types and state.
 // a platform that lends rlsw its framebuffer's pixels defines ReturnScreenPixels to take them back
 #include <errno.h>
+#if defined(__ARM_NEON)
+#include <arm_neon.h>
+#endif
 
 #if defined(GRAPHICS_API_OPENGL_SOFTWARE)
 
@@ -227,25 +230,43 @@ static uint8_t *first_level(const sw_texture_t *tex, bool *a8) {
     return (uint8_t *)copy;
   }
 
-  // gray and alpha, like the glyphs of fonts. when all white, it's an alpha mask
+  // gray and alpha, like the glyphs of fonts. when all white, it's an alpha mask: taken in one pass that vectorizes, as
+  // the atlases of fonts are large
   const uint8_t *pixels = tex->pixels;
-  bool white = true;
-  for (size_t i = 0; i < count && white; i++) white = pixels[2 * i] == 255;
-  uint8_t *copy = malloc(count * (white ? 1 : 4));
-  if (!copy) return NULL;
-  if (white) {
-    for (size_t i = 0; i < count; i++) copy[i] = pixels[2 * i + 1];
-  } else {
-    uint32_t *colors = (uint32_t *)copy;
-    for (size_t i = 0; i < count; i++) {
-      uint32_t gray = pixels[2 * i];
-      uint32_t a = pixels[2 * i + 1];
-      colors[i] = gray | gray << 8 | gray << 16 | a << 24;
-    }
-    cr_premultiply(colors, colors, count);
+  uint8_t *alpha = malloc(count);
+  if (!alpha) return NULL;
+  uint8_t white = 255;
+  for (size_t i = 0; i < count; i++) {
+    white &= pixels[2 * i];
+    alpha[i] = pixels[2 * i + 1];
   }
-  *a8 = white;
-  return copy;
+  if (white == 255) {
+    *a8 = true;
+    return alpha;
+  }
+  free(alpha);
+  uint32_t *colors = malloc(count * 4);
+  if (!colors) return NULL;
+  for (size_t i = 0; i < count; i++) {
+    uint32_t gray = pixels[2 * i];
+    uint32_t a = pixels[2 * i + 1];
+    colors[i] = gray | gray << 8 | gray << 16 | a << 24;
+  }
+  cr_premultiply(colors, colors, count);
+  return (uint8_t *)colors;
+}
+
+// a row of an alpha mask's next level from the two rows of the last: each texel the rounded average of the four it covers
+static void half_alpha_row(const uint8_t *restrict top, const uint8_t *restrict bottom, uint8_t *restrict out, int width) {
+  int x = 0;
+#if defined(__ARM_NEON)
+  for (; x + 16 <= width; x += 16) {
+    uint16x8_t low = vaddq_u16(vpaddlq_u8(vld1q_u8(top + 2 * x)), vpaddlq_u8(vld1q_u8(bottom + 2 * x)));
+    uint16x8_t high = vaddq_u16(vpaddlq_u8(vld1q_u8(top + 2 * x + 16)), vpaddlq_u8(vld1q_u8(bottom + 2 * x + 16)));
+    vst1q_u8(out + x, vcombine_u8(vrshrn_n_u16(low, 2), vrshrn_n_u16(high, 2)));
+  }
+#endif
+  for (; x < width; x++) out[x] = (uint8_t)((top[2 * x] + top[2 * x + 1] + bottom[2 * x] + bottom[2 * x + 1] + 2) >> 2);
 }
 
 // the level half the size of the last one made, each texel the average of the four it covers
@@ -260,6 +281,10 @@ static bool make_next_level(blit_source *source) {
     const uint8_t *top = larger->pixels + (size_t)(2 * y) * larger->width * bytes;
     const uint8_t *bottom = larger->height > 1 ? top + (size_t)larger->width * bytes : top;
     uint8_t *out = pixels + (size_t)y * width * bytes;
+    if (source->a8 && larger->width > 1) {
+      half_alpha_row(top, bottom, out, width);
+      continue;
+    }
     for (int x = 0; x < width; x++) {
       int left = 2 * x * bytes;
       int right = larger->width > 1 ? left + bytes : left;
