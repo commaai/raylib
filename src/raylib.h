@@ -530,6 +530,15 @@ typedef struct FilePathList {
     char **paths;                   // Filepaths entries
 } FilePathList;
 
+// Touch event, a touch point went down, moved or went up
+typedef struct TouchEvent {
+    int slot;                       // Touch point index
+    bool pressed;                   // Touch point went down
+    bool released;                  // Touch point went up (moved if neither)
+    Vector2 position;               // Touch position on screen
+    double time;                    // Event time in seconds (CLOCK_MONOTONIC on comma)
+} TouchEvent;
+
 // Automation event
 typedef struct AutomationEvent {
     unsigned int frame;             // Event frame
@@ -1240,6 +1249,8 @@ RLAPI int GetTouchY(void);                                    // Get touch posit
 RLAPI Vector2 GetTouchPosition(int index);                    // Get touch position XY for a touch point index (relative to screen size)
 RLAPI int GetTouchPointId(int index);                         // Get touch point identifier for given index
 RLAPI int GetTouchPointCount(void);                           // Get number of touch points
+RLAPI int GetTouchEventCount(void);                           // Get number of touch events from the last input poll
+RLAPI TouchEvent GetTouchEvent(int index);                    // Get a touch event from the last input poll
 
 //------------------------------------------------------------------------------------
 // Gestures and Touch Handling Functions (Module: rgestures)

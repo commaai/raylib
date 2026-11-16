@@ -169,6 +169,8 @@ inline void bind_functions(nb::module_ &m) {
   m.def("set_mouse_scale", &SetMouseScale, nb::arg("scaleX"), nb::arg("scaleY"));
   m.def("get_mouse_wheel_move", &GetMouseWheelMove);
   m.def("get_touch_position", &GetTouchPosition, nb::arg("index"));
+  m.def("get_touch_event_count", &GetTouchEventCount);
+  m.def("get_touch_event", &GetTouchEvent, nb::arg("index"));
   m.def("draw_line", &DrawLine, nb::arg("startPosX"), nb::arg("startPosY"), nb::arg("endPosX"), nb::arg("endPosY"), nb::arg("color"));
   m.def("draw_line_ex", &DrawLineEx, nb::arg("startPos"), nb::arg("endPos"), nb::arg("thick"), nb::arg("color"));
   m.def("draw_circle", &DrawCircle, nb::arg("centerX"), nb::arg("centerY"), nb::arg("radius"), nb::arg("color"));

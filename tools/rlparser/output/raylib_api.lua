@@ -1348,6 +1348,37 @@ return {
       }
     },
     {
+      name = "TouchEvent",
+      description = "Touch event, a touch point went down, moved or went up",
+      fields = {
+        {
+          type = "int",
+          name = "slot",
+          description = "Touch point index"
+        },
+        {
+          type = "bool",
+          name = "pressed",
+          description = "Touch point went down"
+        },
+        {
+          type = "bool",
+          name = "released",
+          description = "Touch point went up (moved if neither)"
+        },
+        {
+          type = "Vector2",
+          name = "position",
+          description = "Touch position on screen"
+        },
+        {
+          type = "double",
+          name = "time",
+          description = "Event time in seconds (CLOCK_MONOTONIC on comma)"
+        }
+      }
+    },
+    {
       name = "AutomationEvent",
       description = "Automation event",
       fields = {
@@ -4679,6 +4710,19 @@ return {
       name = "GetTouchPointCount",
       description = "Get number of touch points",
       returnType = "int"
+    },
+    {
+      name = "GetTouchEventCount",
+      description = "Get number of touch events from the last input poll",
+      returnType = "int"
+    },
+    {
+      name = "GetTouchEvent",
+      description = "Get a touch event from the last input poll",
+      returnType = "TouchEvent",
+      params = {
+        {type = "int", name = "index"}
+      }
     },
     {
       name = "SetGesturesEnabled",

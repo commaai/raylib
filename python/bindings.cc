@@ -85,6 +85,9 @@ NB_MODULE(RAYLIB_MODULE, m) {
     .def_rw("glyphPadding", &Font::glyphPadding).def_rw("texture", &Font::texture);
   nb::class_<Shader>(m, "Shader")
     .def(nb::init<>()).def_rw("id", &Shader::id);
+  nb::class_<TouchEvent>(m, "TouchEvent")
+    .def(nb::init<>()).def_rw("slot", &TouchEvent::slot).def_rw("pressed", &TouchEvent::pressed)
+    .def_rw("released", &TouchEvent::released).def_rw("position", &TouchEvent::position).def_rw("time", &TouchEvent::time);
   nb::class_<Matrix>(m, "Matrix").def(nb::init<>())
     .def_rw("m0", &Matrix::m0).def_rw("m1", &Matrix::m1).def_rw("m2", &Matrix::m2).def_rw("m3", &Matrix::m3)
     .def_rw("m4", &Matrix::m4).def_rw("m5", &Matrix::m5).def_rw("m6", &Matrix::m6).def_rw("m7", &Matrix::m7)
