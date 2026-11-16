@@ -258,6 +258,9 @@
 #ifndef MAX_TOUCH_POINTS
     #define MAX_TOUCH_POINTS               8        // Maximum number of touch points supported
 #endif
+#ifndef MAX_TOUCH_EVENTS
+    #define MAX_TOUCH_EVENTS             256        // Maximum number of touch events per input poll
+#endif
 #ifndef MAX_KEY_PRESSED_QUEUE
     #define MAX_KEY_PRESSED_QUEUE         16        // Maximum number of keys in the key input queue
 #endif
@@ -371,6 +374,8 @@ typedef struct CoreData {
             Vector2 previousPosition[MAX_TOUCH_POINTS];     // Previous touch position on screen
             char currentTouchState[MAX_TOUCH_POINTS];       // Registers current touch state
             char previousTouchState[MAX_TOUCH_POINTS];      // Registers previous touch state
+            TouchEvent events[MAX_TOUCH_EVENTS];            // Touch events from the last input poll
+            int eventCount;                                 // Number of touch events
 
         } Touch;
         struct {
@@ -4228,6 +4233,22 @@ int GetTouchPointId(int index)
 int GetTouchPointCount(void)
 {
     return CORE.Input.Touch.pointCount;
+}
+
+// Get number of touch events from the last input poll
+int GetTouchEventCount(void)
+{
+    return CORE.Input.Touch.eventCount;
+}
+
+// Get a touch event from the last input poll
+TouchEvent GetTouchEvent(int index)
+{
+    TouchEvent event = { 0 };
+
+    if ((index >= 0) && (index < CORE.Input.Touch.eventCount)) event = CORE.Input.Touch.events[index];
+
+    return event;
 }
 
 //----------------------------------------------------------------------------------

@@ -81,6 +81,11 @@ class TestRaylibBindings(unittest.TestCase):
         self.assertEqual((rl.WHITE.r, rl.WHITE.g, rl.WHITE.b, rl.WHITE.a), (255, 255, 255, 255))
         self.assertEqual(int(rl.ShaderUniformDataType.SHADER_UNIFORM_FLOAT), 0)
 
+    def test_no_touch_events_without_touchscreen(self):
+        self.assertEqual(rl.get_touch_event_count(), 0)
+        event = rl.get_touch_event(0)
+        self.assertEqual((event.slot, event.pressed, event.released, event.position.x, event.time), (0, False, False, 0, 0))
+
     def test_image_buffer_is_retained(self):
         pixels = bytearray([1, 2, 3, 4, 5, 6])
         image = rl.Image(pixels, 2, 1, 1, rl.PixelFormat.PIXELFORMAT_UNCOMPRESSED_R8G8B8)

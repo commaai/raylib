@@ -53,6 +53,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 
@@ -78,11 +79,14 @@ struct finger {
   int x;
   int y;
   bool resetNextFrame;
+  bool down;     // down at the last SYN_REPORT
+  bool changed;  // got an event since the last SYN_REPORT
 };
 
 struct touch {
   struct finger fingers[MAX_TOUCH_POINTS];
   int fd;
+  bool monotonic;  // event times are CLOCK_MONOTONIC
 };
 
 
@@ -475,6 +479,13 @@ static int init_touch(const char *dev_path) {
     return -1;
   }
 
+  // same clock as clock_gettime(CLOCK_MONOTONIC), the default is CLOCK_REALTIME
+  int clock_id = CLOCK_MONOTONIC;
+  platform.touch.monotonic = ioctl(platform.touch.fd, EVIOCSCLOCKID, &clock_id) == 0;
+  if (!platform.touch.monotonic) {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to set touch clock, touch events get the read time");
+  }
+
   FILE *fp = fopen("/sys/devices/platform/vendor/vendor:gpio-som-id/som_id", "r");
   if (fp != NULL) {
     int origin;
@@ -496,6 +507,8 @@ static int init_touch(const char *dev_path) {
     platform.touch.fingers[i].y = -1;
     platform.touch.fingers[i].state = FINGER_STATE_REMOVED;
     platform.touch.fingers[i].resetNextFrame = false;
+    platform.touch.fingers[i].down = false;
+    platform.touch.fingers[i].changed = false;
 
     CORE.Input.Touch.currentTouchState[0] = 0;
     CORE.Input.Touch.previousTouchState[0] = 0;
@@ -859,9 +872,45 @@ const char *GetKeyName(int key) {
   return "";
 }
 
+static void touch_abs_event(int slot, int code, int value) {
+  struct finger *finger = &platform.touch.fingers[slot];
+  if (code == ABS_MT_TRACKING_ID) { // finger on screen or not. one that is already up stays up, REMOVING again would be a tap
+    if (value != -1) finger->state = FINGER_STATE_TOUCHING;
+    else if (finger->state == FINGER_STATE_TOUCHING) finger->state = FINGER_STATE_REMOVING;
+  } else if (code == ABS_MT_POSITION_X) {
+    finger->y = (1 - platform.canonical_zero) * (CORE.Window.screen.height - value) + (platform.canonical_zero * value);
+  } else if (code == ABS_MT_POSITION_Y) {
+    finger->x = platform.canonical_zero * (CORE.Window.screen.width - value) + ((1 - platform.canonical_zero) * value);
+  } else {
+    return;
+  }
+  finger->changed = true;
+}
+
+// the kernel dropped events because we read too slowly, so read the current state of every finger
+static int resync_touch(int slot) {
+  struct input_absinfo info;
+  struct { uint32_t code; int32_t values[MAX_TOUCH_POINTS]; } mt[3] = { { ABS_MT_TRACKING_ID }, { ABS_MT_POSITION_X }, { ABS_MT_POSITION_Y } };
+  memset(mt[0].values, -1, sizeof(mt[0].values));  // no finger in slots the device doesn't have
+
+  int ret = ioctl(platform.touch.fd, EVIOCGABS(ABS_MT_SLOT), &info);
+  for (int c = 0; c < 3; ++c) ret |= ioctl(platform.touch.fd, EVIOCGMTSLOTS(sizeof(mt[c])), &mt[c]);
+  if (ret < 0) {
+    TRACELOG(LOG_WARNING, "COMMA: Failed to read touch state");
+    return slot;
+  }
+
+  for (int i = 0; i < MAX_TOUCH_POINTS; ++i) {
+    for (int c = 0; c < 3; ++c) touch_abs_event(i, mt[c].code, mt[c].values[i]);
+  }
+  return info.value;
+}
+
 void PollInputEvents(void) {
   // slot i is for events of finger i
   static int slot = 0;
+  // skip events until the next SYN_REPORT after a SYN_DROPPED
+  static bool dropped = false;
 
   for (int i = 0; i < MAX_TOUCH_POINTS; ++i) {
     CORE.Input.Touch.previousTouchState[i] = CORE.Input.Touch.currentTouchState[i];
@@ -878,12 +927,32 @@ void PollInputEvents(void) {
 
   CORE.Input.Mouse.previousPosition = CORE.Input.Mouse.currentPosition;
   CORE.Input.Touch.pointCount = 0;
+  CORE.Input.Touch.eventCount = 0;
 
   struct input_event event = {0};
   while (read(platform.touch.fd, &event, sizeof(struct input_event)) == sizeof(struct input_event)) {
-    if (event.type == SYN_REPORT) { // synchronization frame. Expose completed events back to the library
+    if (event.type == EV_SYN && event.code == SYN_DROPPED) {
+      dropped = true;
+    } else if (event.type == EV_SYN && event.code == SYN_REPORT) { // synchronization frame. Expose completed events back to the library
+      if (dropped) {
+        slot = resync_touch(slot);
+        dropped = false;
+      }
+
+      double time = event.time.tv_sec + event.time.tv_usec * 1e-6;
+      if (!platform.touch.monotonic) time = GetTime() + CORE.Time.base * 1e-9;
 
       for (int i = 0; i < MAX_TOUCH_POINTS; ++i) {
+        // queue every change with its time, the state below only has the last one
+        struct finger *finger = &platform.touch.fingers[i];
+        bool down = finger->state == FINGER_STATE_TOUCHING;
+        if (finger->changed && (down || finger->down) && CORE.Input.Touch.eventCount < MAX_TOUCH_EVENTS) {
+          Vector2 position = { finger->x, finger->y };
+          CORE.Input.Touch.events[CORE.Input.Touch.eventCount++] = (TouchEvent){ i, down && !finger->down, !down, position, time };
+        }
+        finger->changed = false;
+        finger->down = down;
+
         if (platform.touch.fingers[i].state == FINGER_STATE_TOUCHING) {
 
           CORE.Input.Touch.position[i].x = platform.touch.fingers[i].x;
@@ -911,16 +980,12 @@ void PollInputEvents(void) {
         }
       }
 
-    } else if (event.type == EV_ABS) { // raw events. Process these untill we get a sync frame
+    } else if (event.type == EV_ABS && !dropped) { // raw events. Process these untill we get a sync frame
 
       if (event.code == ABS_MT_SLOT) { // switch finger
         slot = event.value;
-      } else if (event.code == ABS_MT_TRACKING_ID) { // finger on screen or not
-        platform.touch.fingers[slot].state = event.value == -1 ? FINGER_STATE_REMOVING : FINGER_STATE_TOUCHING;
-      } else if (event.code == ABS_MT_POSITION_X) {
-        platform.touch.fingers[slot].y = (1 - platform.canonical_zero) * (CORE.Window.screen.height - event.value) + (platform.canonical_zero * event.value);
-      } else if (event.code == ABS_MT_POSITION_Y) {
-        platform.touch.fingers[slot].x = platform.canonical_zero * (CORE.Window.screen.width - event.value) + ((1 - platform.canonical_zero) * event.value);
+      } else {
+        touch_abs_event(slot, event.code, event.value);
       }
     }
   }
