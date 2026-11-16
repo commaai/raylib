@@ -946,7 +946,9 @@ void PollInputEvents(void) {
         // queue every change with its time, the state below only has the last one
         struct finger *finger = &platform.touch.fingers[i];
         bool down = finger->state == FINGER_STATE_TOUCHING;
-        if (finger->changed && (down || finger->down) && CORE.Input.Touch.eventCount < MAX_TOUCH_EVENTS) {
+        // if we read too late, drop moves before presses and releases
+        int maxEvents = (down && finger->down) ? MAX_TOUCH_EVENTS - 2*MAX_TOUCH_POINTS : MAX_TOUCH_EVENTS;
+        if (finger->changed && (down || finger->down) && CORE.Input.Touch.eventCount < maxEvents) {
           Vector2 position = { finger->x, finger->y };
           CORE.Input.Touch.events[CORE.Input.Touch.eventCount++] = (TouchEvent){ i, down && !finger->down, !down, position, time };
         }
