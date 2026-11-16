@@ -59,7 +59,7 @@
         <Define name="SHADER_LOC_MAP_SPECULAR" type="UNKNOWN" value="SHADER_LOC_MAP_METALNESS" desc="" />
         <Define name="GetMouseRay" type="UNKNOWN" value="GetScreenToWorldRay" desc="Compatibility hack for previous raylib versions" />
     </Defines>
-    <Structs count="35">
+    <Structs count="36">
         <Struct name="Vector2" fieldCount="2" desc="Vector2, 2 components">
             <Field type="float" name="x" desc="Vector x component" />
             <Field type="float" name="y" desc="Vector y component" />
@@ -286,6 +286,13 @@
         <Struct name="FilePathList" fieldCount="2" desc="File path list">
             <Field type="unsigned int" name="count" desc="Filepaths entries count" />
             <Field type="char **" name="paths" desc="Filepaths entries" />
+        </Struct>
+        <Struct name="TouchEvent" fieldCount="5" desc="Touch event, a touch point went down, moved or went up">
+            <Field type="int" name="slot" desc="Touch point index" />
+            <Field type="bool" name="pressed" desc="Touch point went down" />
+            <Field type="bool" name="released" desc="Touch point went up (moved if neither)" />
+            <Field type="Vector2" name="position" desc="Touch position on screen" />
+            <Field type="double" name="time" desc="Event time in seconds (CLOCK_MONOTONIC on comma)" />
         </Struct>
         <Struct name="AutomationEvent" fieldCount="3" desc="Automation event">
             <Field type="unsigned int" name="frame" desc="Event frame" />
@@ -682,7 +689,7 @@
             <Param type="unsigned int" name="frames" desc="" />
         </Callback>
     </Callbacks>
-    <Functions count="600">
+    <Functions count="602">
         <Function name="InitWindow" retType="void" paramCount="3" desc="Initialize window and OpenGL context">
             <Param type="int" name="width" desc="" />
             <Param type="int" name="height" desc="" />
@@ -1321,6 +1328,11 @@
             <Param type="int" name="index" desc="" />
         </Function>
         <Function name="GetTouchPointCount" retType="int" paramCount="0" desc="Get number of touch points">
+        </Function>
+        <Function name="GetTouchEventCount" retType="int" paramCount="0" desc="Get number of touch events from the last input poll">
+        </Function>
+        <Function name="GetTouchEvent" retType="TouchEvent" paramCount="1" desc="Get a touch event from the last input poll">
+            <Param type="int" name="index" desc="" />
         </Function>
         <Function name="SetGesturesEnabled" retType="void" paramCount="1" desc="Enable a set of gestures using flags">
             <Param type="unsigned int" name="flags" desc="" />
